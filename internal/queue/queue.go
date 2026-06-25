@@ -32,7 +32,10 @@ func (q *Queue) Enqueue(evs []model.Event) error {
 	name := filepath.Join(q.dir, time.Now().UTC().Format("20060102T150405.000000")+"-"+strconv.Itoa(q.seq)+".json")
 	q.mu.Unlock()
 
-	b, _ := json.Marshal(evs)
+	b, err := json.Marshal(evs)
+	if err != nil {
+		return err
+	}
 	tmp := name + ".tmp"
 	if err := os.WriteFile(tmp, b, 0o600); err != nil {
 		return err

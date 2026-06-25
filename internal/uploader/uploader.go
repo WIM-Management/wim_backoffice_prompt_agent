@@ -65,7 +65,9 @@ func (u *Uploader) sendBatch(evs []model.Event) error {
 			}
 			return 0
 		}(), err)
-		time.Sleep(time.Duration(1<<attempt) * time.Second) // 1,2,4,8,16s
+		if attempt < 4 {
+			time.Sleep(time.Duration(1<<attempt) * time.Second) // 1,2,4,8s
+		}
 	}
 	return lastErr
 }
