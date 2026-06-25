@@ -1,6 +1,9 @@
 package model
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 type Event struct {
 	SourceTool      string  `json:"sourceTool"`
@@ -19,6 +22,16 @@ type NaiveTS time.Time
 
 func (t NaiveTS) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + time.Time(t).UTC().Format("2006-01-02T15:04:05") + `"`), nil
+}
+
+func (t *NaiveTS) UnmarshalJSON(b []byte) error {
+	s := strings.Trim(string(b), `"`)
+	parsed, err := time.Parse("2006-01-02T15:04:05", s)
+	if err != nil {
+		return err
+	}
+	*t = NaiveTS(parsed)
+	return nil
 }
 
 // Adapter: 로컬 도구별 세션 → Event. 구현은 internal/adapter/*.
