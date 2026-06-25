@@ -1,0 +1,4 @@
+{"type":"user","isSidechain":false,"sessionId":"s3","cwd":"/r","timestamp":"2026-06-24T09:00:00Z","message":{"role":"user","content":"질문"}}
+{"type":"assistant","isSidechain":false,"sessionId":"s3","timestamp":"2026-06-24T09:00:03Z","message":{"id":"m3","content":[{"type":"thinking","thinking":"음"}],"usage":{"output_tokens":50},"stop_reason":"tool_use"}}
+{"type":"assistant","isSidechain":false,"sessionId":"s3","timestamp":"2026-06-24T09:00:04Z","message":{"id":"m3","content":[{"type":"text","text":"최종 답"}],"usage":{"output_tokens":50},"stop_reason":"end_turn"}}
+{"type":"user","isSidechain":false,"sessionId":"s3","timestamp":"2026-06-24T09:01:00Z","message":{"role":"user","content":"다음"}}

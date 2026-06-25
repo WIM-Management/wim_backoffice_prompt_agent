@@ -1,0 +1,2 @@
+{"type":"user","isSidechain":false,"sessionId":"s5","cwd":"/r","timestamp":"2026-06-24T09:00:00Z","message":{"role":"user","content":"실행해줘"}}
+{"type":"assistant","isSidechain":false,"sessionId":"s5","timestamp":"2026-06-24T09:00:03Z","message":{"id":"m5","content":[{"type":"tool_use","name":"Bash"}],"usage":{"output_tokens":20},"stop_reason":"tool_use"}}

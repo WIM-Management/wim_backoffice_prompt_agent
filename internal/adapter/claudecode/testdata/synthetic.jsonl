@@ -1,0 +1,5 @@
+{"type":"user","isSidechain":false,"sessionId":"s2","cwd":"/r","timestamp":"2026-06-24T09:00:00Z","message":{"role":"user","content":"<task-notification>\n done\n</task-notification>"}}
+{"type":"user","isSidechain":false,"sessionId":"s2","cwd":"/r","timestamp":"2026-06-24T09:00:01Z","message":{"role":"user","content":"<command-name>/foo</command-name>"}}
+{"type":"user","isSidechain":false,"sessionId":"s2","cwd":"/r","timestamp":"2026-06-24T09:00:02Z","message":{"role":"user","content":"진짜 사람 질문"}}
+{"type":"assistant","isSidechain":false,"sessionId":"s2","timestamp":"2026-06-24T09:00:05Z","message":{"id":"m2","content":[{"type":"text","text":"답"}],"usage":{"output_tokens":3},"stop_reason":"end_turn"}}
+{"type":"user","isSidechain":false,"sessionId":"s2","timestamp":"2026-06-24T09:01:00Z","message":{"role":"user","content":"다음"}}
