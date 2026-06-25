@@ -60,9 +60,12 @@ token, receives a device-scoped bearer token, and stores it in the OS keychain
 (`co.wimcorp.promptagent` / `device_token`).
 
 > **Known P1 limitation**: the native Google OAuth PKCE loopback flow is not
-> yet implemented. Running `enroll` today returns an error:
-> `native Google OAuth not yet implemented — enroll via web UI for now`.
-> Use the web UI enrollment path until the PKCE flow ships in a follow-up.
+> yet implemented, so `enroll` currently returns an error and **cannot obtain a
+> device token**. Until the OAuth flow ships (P1 follow-up), the agent has no
+> token, so `run-once`/the daemon will scan/redact/queue locally but uploads
+> fail (no auth). End-to-end collection is blocked on this one piece. The
+> backend enroll endpoint, token storage, and the whole pipeline are ready —
+> only the client-side Google id_token acquisition remains.
 
 ### `run-once` — scan, redact, and upload once
 
