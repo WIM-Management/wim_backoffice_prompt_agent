@@ -96,20 +96,24 @@ func runOnce(cfg config.Config) error {
 	return q.Drain(func(b []model.Event) error { return up.Send(b) })
 }
 
-// cmdEnroll runs the device enrollment flow.
-// TODO(P1): Native Google OAuth flow (browser + PKCE) is not yet implemented.
-// The IDTokenFn stub below always returns an error so that the CLI subcommand
-// compiles and wires correctly; the real OAuth flow will be added in a follow-up.
+// cmdEnroll runs the device enrollment flow: Google OAuth PKCE loopback to get
+// an id_token, then backend enroll → prompt-agent token in the OS keychain.
 func cmdEnroll(cfg config.Config) error {
-	idTokenFn := func() (string, error) {
-		// TODO(P1): implement native Google OAuth PKCE flow to obtain id_token.
-		return "", fmt.Errorf("native Google OAuth not yet implemented — enroll via web UI for now")
+	if cfg.GoogleClientID == "" {
+		return fmt.Errorf(
+			"OAuth client not configured — set WIM_PROMPT_GOOGLE_CLIENT_ID (and " +
+				"WIM_PROMPT_GOOGLE_CLIENT_SECRET) for the desktop OAuth client")
+	}
+	oauth := enroll.OAuthConfig{
+		ClientID:     cfg.GoogleClientID,
+		ClientSecret: cfg.GoogleClientSecret,
+		HostedDomain: cfg.GoogleHostedDomain,
 	}
 	label, _ := os.Hostname()
 	if label == "" {
 		label = "unknown"
 	}
-	e := enroll.New(cfg.BaseURL, enroll.NewKeychainStore(), idTokenFn)
+	e := enroll.New(cfg.BaseURL, enroll.NewKeychainStore(), oauth.GoogleIDToken)
 	return e.Run(label)
 }
 

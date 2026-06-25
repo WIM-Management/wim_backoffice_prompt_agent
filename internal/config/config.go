@@ -12,6 +12,13 @@ type Config struct {
 	ScanInterval time.Duration
 	IdleCutoff   time.Duration
 	Dir          string
+
+	// Desktop OAuth client for enroll (Google "Desktop app" client — the secret
+	// is non-confidential by design for installed apps). Set via env after the
+	// client is created in Google Cloud.
+	GoogleClientID     string
+	GoogleClientSecret string
+	GoogleHostedDomain string
 }
 
 // Default returns sensible production defaults.
@@ -25,10 +32,18 @@ func Default() Config {
 		base = "https://staging-backoffice-api.wimcorp.co.kr"
 	}
 
+	hd := os.Getenv("WIM_PROMPT_GOOGLE_HD")
+	if hd == "" {
+		hd = "wimcorp.co.kr"
+	}
+
 	return Config{
-		BaseURL:      base,
-		ScanInterval: 15 * time.Minute,
-		IdleCutoff:   10 * time.Minute,
-		Dir:          dir,
+		BaseURL:            base,
+		ScanInterval:       15 * time.Minute,
+		IdleCutoff:         10 * time.Minute,
+		Dir:                dir,
+		GoogleClientID:     os.Getenv("WIM_PROMPT_GOOGLE_CLIENT_ID"),
+		GoogleClientSecret: os.Getenv("WIM_PROMPT_GOOGLE_CLIENT_SECRET"),
+		GoogleHostedDomain: hd,
 	}
 }
