@@ -1,23 +1,23 @@
 # wim-prompt-agent
 
-Local collection agent for WIM Backoffice prompt insights.
+WIM 백오피스 **프롬프트 인사이트** 로컬 수집 에이전트.
 
-## What and Why
+## 무엇이고 왜
 
-`wim-prompt-agent` runs in the background on each developer machine and
-periodically reads settled Claude Code sessions from
-`~/.claude/projects/**/*.jsonl`. It redacts secrets, persists events to a
-local disk queue, and uploads them in batches to the WIM backend
-(`PATCH /api/v1/prompt-insights/events`).
+`wim-prompt-agent`는 각 개발자 머신에서 백그라운드로 돌며, **Claude Code의 로컬 세션 파일**(`~/.claude/projects/**/*.jsonl`)에서 완결된 대화 턴(프롬프트 + 응답)을 주기적으로 읽습니다. 시크릿을 마스킹하고, 로컬 디스크 큐에 영속한 뒤, 배치로 WIM 백엔드(`PATCH /api/v1/prompt-insights/events`)에 업로드합니다.
 
-This design keeps the subscription flat-rate (no per-token API cost) and is
-vendor-neutral: the adapter layer supports multiple tools; Claude Code is P1,
-others (Codex, Cursor, …) are P2+.
+이 방식의 장점:
 
-## Build
+- **정액제 유지** — LLM을 게이트웨이/종량제로 우회하지 않고 로컬 파일만 읽으므로 토큰 추가 비용이 없습니다.
+- **멀티벤더** — 어댑터 계층으로 도구를 확장합니다. P1은 Claude Code, 이후(Codex·Cursor 등)는 P2+.
+- **사람 단위 귀속** — 머신별 enroll(Google 로그인 → `employee.email`)로, 계정 공유와 무관하게 실제 사람에 귀속됩니다.
+
+> 수집 대상은 **로컬 파일에 기록되는 도구**뿐입니다. 서버사이드 봇(Wimmy)·웹챗(claude.ai 웹)은 로컬에 세션이 안 남으므로 이 에이전트로는 수집되지 않습니다(범위 밖).
+
+## 빌드
 
 ```bash
-# macOS (Apple Silicon or Intel)
+# macOS (Apple Silicon / Intel)
 GOOS=darwin GOARCH=arm64 go build -o bin/wim-prompt-agent ./cmd/wim-prompt-agent
 GOOS=darwin GOARCH=amd64 go build -o bin/wim-prompt-agent ./cmd/wim-prompt-agent
 
@@ -25,128 +25,108 @@ GOOS=darwin GOARCH=amd64 go build -o bin/wim-prompt-agent ./cmd/wim-prompt-agent
 GOOS=linux GOARCH=amd64 go build -o bin/wim-prompt-agent ./cmd/wim-prompt-agent
 ```
 
-Go 1.22+ required. No external dependencies (`go.mod` stdlib-only).
+Go 1.22+ 필요. **외부 의존성 없음**(`go.mod` 표준 라이브러리만).
 
-## Commands
+## 명령어
 
-### `install` — register periodic daemon
+### `enroll` — 이 디바이스를 백엔드에 등록
+
+```bash
+export WIM_PROMPT_GOOGLE_CLIENT_ID=<desktop-client-id>
+export WIM_PROMPT_GOOGLE_CLIENT_SECRET=<desktop-client-secret>   # 데스크톱 client는 비밀 아님
+export WIM_PROMPT_BASE_URL=https://staging-backoffice-api.wimcorp.co.kr
+./wim-prompt-agent enroll
+```
+
+Google OAuth 2.0 **PKCE loopback** 플로우를 실행합니다 — 브라우저를 열어 로그인하면 `127.0.0.1` 콜백으로 인가 코드를 받아 Google `id_token`으로 교환하고, `POST /api/v1/prompt-insights/enroll`로 디바이스 토큰을 받아 **OS 키체인**(mac Keychain / Linux libsecret)에 저장합니다.
+
+**전제 조건:**
+- Google Cloud **"Desktop app" OAuth client**의 id/secret을 위 env로 설정.
+- 백엔드가 그 client_id를 audience로 받아들이도록 Vault `oauth2.google.agent-client-id`에 같은 데스크톱 client_id 설정.
+- 백엔드 `employees`에 본인 행의 `email`이 채워져 있어야 함(없으면 enroll 500: "일치하는 직원이 없음").
+
+### `install` / `uninstall` — 주기 데몬 등록/해제
 
 ```bash
 ./wim-prompt-agent install
-```
-
-- **macOS**: installs a `launchd` user agent (`co.wimcorp.promptagent`) that
-  runs `run-once` every 10 minutes.
-- **Linux**: installs a `systemd --user` timer (`wim-prompt-agent.timer`)
-  with the same interval.
-
-The binary path is resolved at install time via `os.Executable()`; move the
-binary before running `install`.
-
-To remove:
-
-```bash
 ./wim-prompt-agent uninstall
 ```
 
-### `enroll` — register this device with the WIM backend
+- **macOS**: `launchd` 사용자 에이전트(`co.wimcorp.promptagent`)를 등록해 주기적으로 `run-once` 실행.
+- **Linux**: `systemd --user` 타이머(`wim-prompt-agent.timer`)를 등록(+ `loginctl enable-linger`로 로그아웃 중에도 동작).
 
-```bash
-WIM_PROMPT_BASE_URL=https://staging-backoffice-api.wimcorp.co.kr ./wim-prompt-agent enroll
-```
+바이너리 경로는 설치 시점에 `os.Executable()`로 잡으므로, **바이너리를 옮긴 뒤** `install` 하세요.
 
-`enroll` runs the Google OAuth 2.0 **PKCE loopback** flow (opens your browser,
-captures the auth code on a `127.0.0.1` callback, exchanges it for a Google
-`id_token`), calls `POST /api/v1/prompt-insights/enroll` with that token,
-receives a device-scoped bearer token, and stores it in the OS keychain.
-
-> **Setup required**: enroll needs a Google Cloud **"Desktop app" OAuth client**.
-> Set its credentials before running:
-> ```bash
-> export WIM_PROMPT_GOOGLE_CLIENT_ID=<desktop-client-id>
-> export WIM_PROMPT_GOOGLE_CLIENT_SECRET=<desktop-client-secret>   # non-confidential for desktop clients
-> ./wim-prompt-agent enroll
-> ```
-> The backend must also accept this client as an audience — set Vault
-> `OAUTH2_GOOGLE_AGENT_CLIENT_ID` to the same desktop client id (see backend PR).
-> Without these, enroll exits with "OAuth client not configured" (and uploads
-> have no token).
-
-### `run-once` — scan, redact, and upload once
+### `run-once` — 1회 스캔·마스킹·업로드
 
 ```bash
 WIM_PROMPT_BASE_URL=https://staging-backoffice-api.wimcorp.co.kr ./wim-prompt-agent run-once
 ```
 
-Runs the full pipeline once:
+전체 파이프라인을 1회 실행:
 
-1. Scan `~/.claude/projects/**/*.jsonl` for new settled turns (prompt +
-   response pairs where the next user message or file idle-timeout confirms
-   the turn is complete).
-2. Redact known secret patterns (`sk-…`, PEM keys, GitHub tokens, AWS keys).
-3. Enqueue events to `~/.wim-prompt-agent/queue/` (disk-persistent).
-4. Advance the per-file byte offset in `~/.wim-prompt-agent/state.json` (only
-   after enqueue succeeds — no event loss on crash).
-5. Drain the queue: upload to backend in batches of 100. Transient failures
-   leave queue files on disk for the next run (automatic retry).
+1. `~/.claude/projects/**/*.jsonl`에서 **완결된 새 턴**을 스캔(다음 사람 프롬프트가 오거나 파일이 idle이면 완결로 판정).
+2. 시크릿 패턴 마스킹(`sk-…`, PEM 키, GitHub 토큰, AWS 키).
+3. 이벤트를 `~/.wim-prompt-agent/queue/`에 enqueue(디스크 영속).
+4. 파일별 byte offset을 `~/.wim-prompt-agent/state.json`에 전진(**enqueue 성공 후에만** — 크래시 시 유실 0).
+5. 큐 드레인: 100건 배치로 백엔드 업로드. 일시 실패 시 큐 파일을 디스크에 남겨 다음 실행에 자동 재시도.
 
-### `status` — show current configuration
+### `status` — 현재 설정 표시
 
 ```bash
 ./wim-prompt-agent status
 ```
 
-Prints agent version, data directory, base URL, scan interval, and OS.
+버전·데이터 디렉터리·백엔드 URL·스캔 주기·OS를 출력합니다.
 
-## Configuration
+## 설정
 
-| Environment variable             | Default                                  | Description                                       |
-|----------------------------------|------------------------------------------|---------------------------------------------------|
-| `WIM_PROMPT_BASE_URL`            | `https://staging-backoffice-api.wimcorp.co.kr` | Backend base URL for enroll and upload calls. |
-| `WIM_PROMPT_GOOGLE_CLIENT_ID`    | (unset)                                  | Desktop OAuth client id (required for `enroll`).  |
-| `WIM_PROMPT_GOOGLE_CLIENT_SECRET`| (unset)                                  | Desktop OAuth client secret (non-confidential).   |
-| `WIM_PROMPT_GOOGLE_HD`           | `wimcorp.co.kr`                          | Google `hd` hosted-domain hint for the login.     |
+| 환경 변수                          | 기본값                                          | 설명                                       |
+|------------------------------------|-------------------------------------------------|--------------------------------------------|
+| `WIM_PROMPT_BASE_URL`              | `https://staging-backoffice-api.wimcorp.co.kr`  | enroll·업로드 대상 백엔드 base URL.         |
+| `WIM_PROMPT_GOOGLE_CLIENT_ID`      | (미설정)                                        | 데스크톱 OAuth client id (`enroll`에 필수). |
+| `WIM_PROMPT_GOOGLE_CLIENT_SECRET`  | (미설정)                                        | 데스크톱 OAuth client secret (비밀 아님).   |
+| `WIM_PROMPT_GOOGLE_HD`             | `wimcorp.co.kr`                                 | Google `hd` 호스티드 도메인 힌트.          |
 
-All other settings (scan interval, idle cutoff, data directory) are compiled-in
-defaults (`internal/config/config.go`). No config file is required.
+스캔 주기(15분)·idle 임계(10분)·데이터 디렉터리 등은 컴파일 내장 기본값(`internal/config/config.go`). 설정 파일은 필요 없습니다.
 
-## Known P1 Constraints
+## 파싱 규칙 (요점)
 
-1. **`enroll` needs a Google "Desktop app" OAuth client**: the PKCE loopback
-   flow is implemented, but until the desktop OAuth client is created and its
-   id/secret are set (`WIM_PROMPT_GOOGLE_CLIENT_ID`/`_SECRET`) AND the backend
-   accepts that audience (Vault `OAUTH2_GOOGLE_AGENT_CLIENT_ID`), enroll cannot
-   obtain a token and uploads have no auth. This is the one gate before live
-   end-to-end collection.
+Claude Code의 jsonl은 깨끗한 채팅 로그가 아니라 다중화된 이벤트 스트림이라, 다음 불변식으로 사람 프롬프트만 골라냅니다:
 
-2. **Linux requires `libsecret-tools`**: the Linux keychain backend calls
-   `secret-tool` (part of the `libsecret-tools` / `libsecret` package).
-   Install it before running `enroll` or `run-once`:
-   ```bash
-   sudo apt-get install libsecret-tools   # Debian/Ubuntu
-   sudo dnf install libsecret             # Fedora/RHEL
-   ```
+- **default-deny**: `type=="user"` && 사이드체인 아님 && tool_result 아님. 합성/하니스 주입(`<task-notification>`·`<command-*>`·`<system-reminder>` 등)은 제외. 이미지 첨부 등 배열 content는 text 블록만 추출.
+- **message.id 그룹핑**: 한 메시지가 여러 줄로 쪼개지므로, 응답 텍스트·토큰 수를 `message.id` 단위로 1회만 집계(중복·과대계상 방지).
+- **완결성**: 응답이 끝난(다음 사람 프롬프트 존재 OR 파일 idle + `stop_reason∈{end_turn,stop_sequence}`) 턴만 방출. 생성 중인 마지막 턴은 보류.
 
-3. **Windows is P2**: `install`, `enroll`, and the keychain backend are not
-   implemented for Windows. Use `run-once` manually via Task Scheduler if
-   needed.
+## 데이터 디렉터리
 
-## Data Directory
-
-All runtime state lives in `~/.wim-prompt-agent/` (created automatically):
+런타임 상태는 `~/.wim-prompt-agent/`에 보관(자동 생성):
 
 ```
 ~/.wim-prompt-agent/
-  state.json        # per-file byte offsets (scanner progress)
-  queue/            # disk-persistent event batches (auto-drained)
+  state.json        # 파일별 byte offset(스캐너 진행 상황)
+  queue/            # 디스크 영속 이벤트 배치(자동 드레인)
 ```
 
-## Testing
+토큰은 평문 파일이 아니라 **OS 키체인**에 저장합니다.
+
+## 플랫폼 / 알려진 제약
+
+- **P1 = macOS + Linux**. Windows는 P2(`install`·`enroll`·키체인 미구현).
+- **Linux는 `libsecret-tools` 필요**(키체인 백엔드가 `secret-tool` 호출):
+  ```bash
+  sudo apt-get install libsecret-tools   # Debian/Ubuntu
+  sudo dnf install libsecret             # Fedora/RHEL
+  ```
+
+## 테스트
 
 ```bash
 go test ./...
 ```
 
-All packages are tested, including an integration E2E test in
-`internal/e2e/` that wires the full pipeline against a mock HTTP server
-in a temp directory (no keychain, no daemon required).
+전 패키지 테스트 + `internal/e2e/`의 통합 테스트(임시 디렉터리에 가짜 세션을 만들어 mock HTTP 서버 대상으로 파이프라인 전체를 검증, 키체인·데몬 불필요)를 포함합니다.
+
+## 프라이버시
+
+전사 프롬프트 역량 코칭을 위한 fleet-wide 수집이며, 열람 모델은 **NAMED_ADMIN**(개인 실명으로 관리자 열람)입니다. 전송 전 로컬 Redactor + 중앙 PII 마스킹의 이중 안전망이 적용됩니다. `enroll`은 명시적 동의 행위입니다.
