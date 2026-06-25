@@ -106,6 +106,9 @@ func cmdEnroll(cfg config.Config) error {
 		return "", fmt.Errorf("native Google OAuth not yet implemented — enroll via web UI for now")
 	}
 	label, _ := os.Hostname()
+	if label == "" {
+		label = "unknown"
+	}
 	e := enroll.New(cfg.BaseURL, enroll.NewKeychainStore(), idTokenFn)
 	return e.Run(label)
 }

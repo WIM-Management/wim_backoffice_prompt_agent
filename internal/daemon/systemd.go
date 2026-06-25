@@ -21,7 +21,7 @@ func InstallLinux(execPath string, intervalSec int) error {
 Description=WIM prompt agent
 [Service]
 Type=oneshot
-ExecStart=%s run-once
+ExecStart="%s" run-once
 `, execPath)
 
 	timer := fmt.Sprintf(`[Unit]
