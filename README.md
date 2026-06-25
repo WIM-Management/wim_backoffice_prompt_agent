@@ -55,17 +55,22 @@ To remove:
 WIM_PROMPT_BASE_URL=https://staging-backoffice-api.wimcorp.co.kr ./wim-prompt-agent enroll
 ```
 
-`enroll` calls `POST /api/v1/prompt-insights/enroll` with a Google identity
-token, receives a device-scoped bearer token, and stores it in the OS keychain
-(`co.wimcorp.promptagent` / `device_token`).
+`enroll` runs the Google OAuth 2.0 **PKCE loopback** flow (opens your browser,
+captures the auth code on a `127.0.0.1` callback, exchanges it for a Google
+`id_token`), calls `POST /api/v1/prompt-insights/enroll` with that token,
+receives a device-scoped bearer token, and stores it in the OS keychain.
 
-> **Known P1 limitation**: the native Google OAuth PKCE loopback flow is not
-> yet implemented, so `enroll` currently returns an error and **cannot obtain a
-> device token**. Until the OAuth flow ships (P1 follow-up), the agent has no
-> token, so `run-once`/the daemon will scan/redact/queue locally but uploads
-> fail (no auth). End-to-end collection is blocked on this one piece. The
-> backend enroll endpoint, token storage, and the whole pipeline are ready —
-> only the client-side Google id_token acquisition remains.
+> **Setup required**: enroll needs a Google Cloud **"Desktop app" OAuth client**.
+> Set its credentials before running:
+> ```bash
+> export WIM_PROMPT_GOOGLE_CLIENT_ID=<desktop-client-id>
+> export WIM_PROMPT_GOOGLE_CLIENT_SECRET=<desktop-client-secret>   # non-confidential for desktop clients
+> ./wim-prompt-agent enroll
+> ```
+> The backend must also accept this client as an audience — set Vault
+> `OAUTH2_GOOGLE_AGENT_CLIENT_ID` to the same desktop client id (see backend PR).
+> Without these, enroll exits with "OAuth client not configured" (and uploads
+> have no token).
 
 ### `run-once` — scan, redact, and upload once
 
@@ -95,20 +100,24 @@ Prints agent version, data directory, base URL, scan interval, and OS.
 
 ## Configuration
 
-| Environment variable   | Default                                       | Description                                   |
-|------------------------|-----------------------------------------------|-----------------------------------------------|
-| `WIM_PROMPT_BASE_URL`  | `https://backoffice-api.wimcorp.co.kr`        | Backend base URL for enroll and upload calls. |
+| Environment variable             | Default                                  | Description                                       |
+|----------------------------------|------------------------------------------|---------------------------------------------------|
+| `WIM_PROMPT_BASE_URL`            | `https://staging-backoffice-api.wimcorp.co.kr` | Backend base URL for enroll and upload calls. |
+| `WIM_PROMPT_GOOGLE_CLIENT_ID`    | (unset)                                  | Desktop OAuth client id (required for `enroll`).  |
+| `WIM_PROMPT_GOOGLE_CLIENT_SECRET`| (unset)                                  | Desktop OAuth client secret (non-confidential).   |
+| `WIM_PROMPT_GOOGLE_HD`           | `wimcorp.co.kr`                          | Google `hd` hosted-domain hint for the login.     |
 
 All other settings (scan interval, idle cutoff, data directory) are compiled-in
 defaults (`internal/config/config.go`). No config file is required.
 
 ## Known P1 Constraints
 
-1. **`enroll` native OAuth stub**: the `IDTokenFn` in `enroll` is a
-   compile-ready stub that always returns an error. The real Google OAuth PKCE
-   loopback flow (browser open + local redirect server) is planned for P1
-   follow-up. Until then, obtain a device token via the web UI and set it
-   manually in the keychain.
+1. **`enroll` needs a Google "Desktop app" OAuth client**: the PKCE loopback
+   flow is implemented, but until the desktop OAuth client is created and its
+   id/secret are set (`WIM_PROMPT_GOOGLE_CLIENT_ID`/`_SECRET`) AND the backend
+   accepts that audience (Vault `OAUTH2_GOOGLE_AGENT_CLIENT_ID`), enroll cannot
+   obtain a token and uploads have no auth. This is the one gate before live
+   end-to-end collection.
 
 2. **Linux requires `libsecret-tools`**: the Linux keychain backend calls
    `secret-tool` (part of the `libsecret-tools` / `libsecret` package).
