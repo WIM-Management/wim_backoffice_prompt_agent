@@ -3,6 +3,8 @@
 {"type":"user","isSidechain":false,"sessionId":"s2","cwd":"/r","timestamp":"2026-06-24T09:00:02Z","message":{"role":"user","content":"This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion."}}
 {"type":"user","isSidechain":false,"sessionId":"s2","cwd":"/r","timestamp":"2026-06-24T09:00:03Z","message":{"role":"user","content":"Base directory for this skill: /Users/x/.claude/plugins/superpowers/skills/using-git-worktrees\n\n# Using git worktrees"}}
 {"type":"user","isSidechain":false,"sessionId":"s2","cwd":"/r","timestamp":"2026-06-24T09:00:04Z","message":{"role":"user","content":"## Context Usage\n\n**Model:** claude-opus-4-8[1m]  \n**Tokens:** 91.8k / 1m (9%)"}}
+{"type":"user","isSidechain":false,"sessionId":"s2","cwd":"/r","timestamp":"2026-06-24T09:00:04.3Z","message":{"role":"user","content":"[Request interrupted by user]"}}
+{"type":"user","isSidechain":false,"sessionId":"s2","cwd":"/r","timestamp":"2026-06-24T09:00:04.6Z","message":{"role":"user","content":"[Request interrupted by user for tool use]"}}
 {"type":"user","isSidechain":false,"sessionId":"s2","cwd":"/r","timestamp":"2026-06-24T09:00:05Z","message":{"role":"user","content":"진짜 사람 질문"}}
 {"type":"assistant","isSidechain":false,"sessionId":"s2","timestamp":"2026-06-24T09:00:06Z","message":{"id":"m2","content":[{"type":"text","text":"답"}],"usage":{"output_tokens":3},"stop_reason":"end_turn"}}
 {"type":"user","isSidechain":false,"sessionId":"s2","timestamp":"2026-06-24T09:01:00Z","message":{"role":"user","content":"다음"}}

@@ -36,6 +36,7 @@ var syntheticPrefixes = []string{
 	"This session is being continued from a previous conversation", // 컴팩션 요약 주입
 	"Base directory for this skill:",                               // 스킬 활성화 프리앰블
 	"## Context Usage",                                             // /context 명령 렌더 출력
+	"[Request interrupted by user",                                 // 인터럽트 마커(…]·… for tool use] 둘 다)
 }
 
 type rawLine struct {

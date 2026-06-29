@@ -48,6 +48,8 @@ func TestHarnessInjectionPrefixesSynthetic(t *testing.T) {
 		"This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion.",
 		"Base directory for this skill: /Users/x/.claude/plugins/superpowers/skills/foo\n\n# Foo",
 		"## Context Usage\n\n**Model:** claude-opus-4-8[1m]  \n**Tokens:** 91.8k / 1m (9%)",
+		"[Request interrupted by user]",
+		"[Request interrupted by user for tool use]",
 	}
 	for _, s := range synthetic {
 		if !isSynthetic(s) {
