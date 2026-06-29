@@ -13,7 +13,7 @@ import (
 
 type Adapter struct{}
 
-func New() *Adapter { return &Adapter{} }
+func New() *Adapter             { return &Adapter{} }
 func (a *Adapter) Name() string { return "CLAUDE_CODE" }
 func (a *Adapter) SessionPaths() ([]string, error) {
 	home, err := os.UserHomeDir()
@@ -26,6 +26,16 @@ func (a *Adapter) SessionPaths() ([]string, error) {
 var syntheticMarkers = []string{
 	"<task-notification>", "<command-name>", "<command-message>", "<command-args>",
 	"<local-command-stdout>", "<system-reminder>", "Caveat: The messages below",
+}
+
+// syntheticPrefixes: 하네스가 user 역할로 주입하지만 사람이 친 프롬프트가 아닌 블록.
+// 태그가 없어 syntheticMarkers(Contains)로는 못 거른다. 이들은 항상 고정 문구로
+// "시작"하므로 prefix로 판정한다 — 중간에 이 문구를 인용한 실제 프롬프트까지
+// 잘못 제외하지 않기 위함(Contains 대신 HasPrefix).
+var syntheticPrefixes = []string{
+	"This session is being continued from a previous conversation", // 컴팩션 요약 주입
+	"Base directory for this skill:",                               // 스킬 활성화 프리앰블
+	"## Context Usage",                                             // /context 명령 렌더 출력
 }
 
 type rawLine struct {
@@ -175,6 +185,12 @@ func humanPromptText(content json.RawMessage) (string, bool) {
 func isSynthetic(text string) bool {
 	for _, m := range syntheticMarkers {
 		if strings.Contains(text, m) {
+			return true
+		}
+	}
+	trimmed := strings.TrimSpace(text)
+	for _, p := range syntheticPrefixes {
+		if strings.HasPrefix(trimmed, p) {
 			return true
 		}
 	}
