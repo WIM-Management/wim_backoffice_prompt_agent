@@ -42,6 +42,33 @@ func TestSyntheticDropped(t *testing.T) {
 	}
 }
 
+func TestHarnessInjectionPrefixesSynthetic(t *testing.T) {
+	// 태그 없이 user 역할로 주입되는 하네스 블록 — prefix로 제외돼야 한다.
+	synthetic := []string{
+		"This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion.",
+		"Base directory for this skill: /Users/x/.claude/plugins/superpowers/skills/foo\n\n# Foo",
+		"## Context Usage\n\n**Model:** claude-opus-4-8[1m]  \n**Tokens:** 91.8k / 1m (9%)",
+		"[Request interrupted by user]",
+		"[Request interrupted by user for tool use]",
+	}
+	for _, s := range synthetic {
+		if !isSynthetic(s) {
+			t.Errorf("주입 블록이 합성으로 안 걸림: %.60q", s)
+		}
+	}
+	// 음성: 같은 문구를 중간에 인용/언급한 실제 프롬프트는 제외하면 안 된다(prefix라서 안전).
+	real := []string{
+		"컨텍스트 사용량(## Context Usage) 좀 알려줘",
+		"이 스킬의 base directory for this skill 경로 어디야?",
+		"방금 previous conversation 내용 요약해줘",
+	}
+	for _, s := range real {
+		if isSynthetic(s) {
+			t.Errorf("실제 프롬프트를 합성으로 오판: %q", s)
+		}
+	}
+}
+
 func TestMultilineMessageGrouping(t *testing.T) {
 	evs := parseFixture(t, "multiline_msg.jsonl", time.Time{})
 	if len(evs) != 1 {
