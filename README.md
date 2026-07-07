@@ -14,6 +14,20 @@ WIM 백오피스 **프롬프트 인사이트** 로컬 수집 에이전트.
 
 > 수집 대상은 **로컬 파일에 기록되는 도구**뿐입니다. 서버사이드 봇(Wimmy)·웹챗(claude.ai 웹)은 로컬에 세션이 안 남으므로 이 에이전트로는 수집되지 않습니다(범위 밖).
 
+## 설치 (릴리스 바이너리)
+
+[GitHub Releases](https://github.com/WIM-Management/wim_backoffice_prompt_agent/releases)에서 플랫폼별 바이너리를 받는다 (`darwin-arm64` / `darwin-amd64` / `linux-amd64`, `SHA256SUMS`로 무결성 검증).
+
+```bash
+curl -L -o /usr/local/bin/wim-prompt-agent \
+  https://github.com/WIM-Management/wim_backoffice_prompt_agent/releases/latest/download/wim-prompt-agent-darwin-arm64
+chmod +x /usr/local/bin/wim-prompt-agent
+# macOS Gatekeeper가 미서명 바이너리를 차단하면:
+xattr -d com.apple.quarantine /usr/local/bin/wim-prompt-agent
+```
+
+설치 후: `enroll`(기기 등록, Google 로그인) → `install`(15분 주기 백그라운드 수집). 아래 명령어 섹션 참고.
+
 ## 빌드
 
 ```bash
