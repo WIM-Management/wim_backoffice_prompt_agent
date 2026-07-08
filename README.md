@@ -41,6 +41,19 @@ GOOS=linux GOARCH=amd64 go build -o bin/wim-prompt-agent ./cmd/wim-prompt-agent
 
 Go 1.22+ 필요. **외부 의존성 없음**(`go.mod` 표준 라이브러리만).
 
+로컬 빌드 바이너리의 버전은 `dev`로 표시됩니다. 릴리스 버전은 CI가 태그명을 ldflags로 주입합니다(아래).
+
+## 릴리스
+
+`v*` 태그를 push하면 GitHub Actions([release.yml](.github/workflows/release.yml))가 테스트 → OS별 바이너리 3종(`darwin-arm64`/`darwin-amd64`/`linux-amd64`) 빌드 → `SHA256SUMS` 생성 → GitHub Release 발행까지 자동으로 합니다. 수동 빌드·업로드 불필요.
+
+```bash
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+바이너리 `version` 출력에는 태그명이 그대로 찍힙니다(`-X main.Version=<태그>`). 코드 안의 버전 상수를 bump할 필요가 없습니다.
+
 ## 명령어
 
 ### `enroll` — 이 디바이스를 백엔드에 등록
