@@ -19,9 +19,10 @@ func TestVerifyToken(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			var gotAuth string
+			var gotAuth, gotSourceTool string
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				gotAuth = r.Header.Get("Authorization")
+				gotSourceTool = r.URL.Query().Get("sourceTool")
 				if r.URL.Path != "/api/v1/prompt-insights/cursor" {
 					t.Errorf("path = %s", r.URL.Path)
 				}
@@ -33,6 +34,10 @@ func TestVerifyToken(t *testing.T) {
 			}
 			if gotAuth != "Bearer tok123" {
 				t.Errorf("Authorization = %q", gotAuth)
+			}
+			// 필수 파라미터 — 없으면 백엔드가 500(바인딩) → 인증상태를 가림
+			if gotSourceTool != "CLAUDE_CODE" {
+				t.Errorf("sourceTool = %q, want CLAUDE_CODE", gotSourceTool)
 			}
 		})
 	}
