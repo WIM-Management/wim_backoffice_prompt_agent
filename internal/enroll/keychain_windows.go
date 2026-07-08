@@ -78,7 +78,7 @@ func dpapiEncrypt(data []byte) ([]byte, error) {
 	var out dataBlob
 	r, _, err := procProtectData.Call(
 		uintptr(unsafe.Pointer(newBlob(data))), // pDataIn
-		0, 0, 0, 0, // szDataDescr, pOptionalEntropy, pvReserved, pPromptStruct
+		0, 0, 0, 0,                             // szDataDescr, pOptionalEntropy, pvReserved, pPromptStruct
 		cryptprotectUIForbidden,       // dwFlags
 		uintptr(unsafe.Pointer(&out)), // pDataOut
 	)
@@ -92,7 +92,7 @@ func dpapiDecrypt(data []byte) ([]byte, error) {
 	var out dataBlob
 	r, _, err := procUnprotectData.Call(
 		uintptr(unsafe.Pointer(newBlob(data))), // pDataIn
-		0, 0, 0, 0, // ppszDataDescr, pOptionalEntropy, pvReserved, pPromptStruct
+		0, 0, 0, 0,                             // ppszDataDescr, pOptionalEntropy, pvReserved, pPromptStruct
 		cryptprotectUIForbidden,       // dwFlags
 		uintptr(unsafe.Pointer(&out)), // pDataOut
 	)
