@@ -39,7 +39,7 @@ func Default() Config {
 
 	base := os.Getenv("WIM_PROMPT_BASE_URL")
 	if base == "" {
-		base = "https://staging-backoffice-api.wimcorp.co.kr"
+		base = "https://backoffice-api.wimcorp.co.kr"
 	}
 
 	hd := os.Getenv("WIM_PROMPT_GOOGLE_HD")
