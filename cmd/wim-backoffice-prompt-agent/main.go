@@ -122,16 +122,27 @@ func cmdEnroll(cfg config.Config) error {
 	return e.Run(label)
 }
 
-// ensureEnrolled makes sure a usable device token exists before installing the daemon.
-// No token → enroll. Token present → verify; only an explicit rejection re-enrolls
-// (a transient/offline failure keeps the existing token).
-func ensureEnrolled(cfg config.Config) error {
-	token, _ := enroll.NewKeychainStore().Get()
+// needsEnroll is the pure decision behind ensureEnrolled (unit-tested).
+// No token → enroll. Token present → re-enroll ONLY if the verifier explicitly
+// rejects it; a transient/offline failure (TokenUnknown) keeps the healthy token.
+// verify is lazy so an empty token never triggers a network call.
+func needsEnroll(token string, verify func() enroll.TokenValidity) bool {
 	if token == "" {
-		return cmdEnroll(cfg)
+		return true
 	}
-	if enroll.VerifyToken(cfg.BaseURL, token) == enroll.TokenRejected {
-		fmt.Println("기존 기기 등록이 만료·폐기되어 재등록합니다.")
+	return verify() == enroll.TokenRejected
+}
+
+// ensureEnrolled makes sure a usable device token exists before installing the daemon.
+func ensureEnrolled(cfg config.Config) error {
+	token, err := enroll.NewKeychainStore().Get()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "기기 토큰 조회 실패, 재등록 진행: %v\n", err)
+	}
+	if needsEnroll(token, func() enroll.TokenValidity { return enroll.VerifyToken(cfg.BaseURL, token) }) {
+		if token != "" {
+			fmt.Println("기존 기기 등록이 만료·폐기되어 재등록합니다.")
+		}
 		return cmdEnroll(cfg)
 	}
 	return nil
