@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 type FileState struct {
@@ -14,8 +15,9 @@ type FileState struct {
 }
 
 type Data struct {
-	Files      map[string]FileState `json:"files"`
-	LastSentTs map[string]string    `json:"lastSentTs"`
+	Files           map[string]FileState `json:"files"`
+	LastSentTs      map[string]string    `json:"lastSentTs"`
+	LastUpdateCheck time.Time            `json:"lastUpdateCheck,omitempty"`
 }
 
 type Store struct {
