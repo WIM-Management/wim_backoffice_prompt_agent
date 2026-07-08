@@ -16,7 +16,7 @@ var (
 	DefaultGoogleClientSecret = ""
 )
 
-// Config holds runtime configuration for wim-prompt-agent.
+// Config holds runtime configuration for wim-backoffice-prompt-agent.
 type Config struct {
 	BaseURL      string
 	ScanInterval time.Duration
@@ -35,7 +35,7 @@ type Config struct {
 // Override WIM_PROMPT_BASE_URL to point at a different backend.
 func Default() Config {
 	home, _ := os.UserHomeDir()
-	dir := filepath.Join(home, ".wim-prompt-agent")
+	dir := filepath.Join(home, ".wim-backoffice-prompt-agent")
 
 	base := os.Getenv("WIM_PROMPT_BASE_URL")
 	if base == "" {

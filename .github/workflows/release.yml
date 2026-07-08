@@ -43,10 +43,10 @@ jobs:
             GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 \
               go build -trimpath \
                 -ldflags "-s -w -X main.Version=${GITHUB_REF_NAME} -X ${CONFIG_PKG}.DefaultGoogleClientID=${GOOGLE_CLIENT_ID} -X ${CONFIG_PKG}.DefaultGoogleClientSecret=${GOOGLE_CLIENT_SECRET}" \
-                -o "dist/wim-prompt-agent-${goos}-${goarch}${ext}" \
-                ./cmd/wim-prompt-agent
+                -o "dist/wim-backoffice-prompt-agent-${goos}-${goarch}${ext}" \
+                ./cmd/wim-backoffice-prompt-agent
           done
-          cd dist && sha256sum wim-prompt-agent-* > SHA256SUMS
+          cd dist && sha256sum wim-backoffice-prompt-agent-* > SHA256SUMS
 
       - name: Publish release to public distribution repo
         env:
@@ -68,5 +68,5 @@ jobs:
             gh release create "$GITHUB_REF_NAME" dist/* \
               --repo "$DIST_REPO" \
               --title "$GITHUB_REF_NAME" \
-              --notes "wim-prompt-agent $GITHUB_REF_NAME — OS별 바이너리 5종 + SHA256SUMS. 설치는 배포 레포 README의 원라이너 사용 권장."
+              --notes "wim-backoffice-prompt-agent $GITHUB_REF_NAME — OS별 바이너리 5종 + SHA256SUMS. 설치는 배포 레포 README의 원라이너 사용 권장."
           fi

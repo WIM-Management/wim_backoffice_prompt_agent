@@ -8,15 +8,15 @@ import (
 )
 
 // InstallMac writes a launchd plist to ~/Library/LaunchAgents/ and loads it.
-// The agent runs wim-prompt-agent run-once every interval seconds.
+// The agent runs wim-backoffice-prompt-agent run-once every interval seconds.
 func InstallMac(execPath string, interval int) error {
 	home, _ := os.UserHomeDir()
-	plist := filepath.Join(home, "Library/LaunchAgents/co.wimcorp.promptagent.plist")
+	plist := filepath.Join(home, "Library/LaunchAgents/co.wimcorp.wim-backoffice-prompt-agent.plist")
 
 	content := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>Label</key><string>co.wimcorp.promptagent</string>
+  <key>Label</key><string>co.wimcorp.wim-backoffice-prompt-agent</string>
   <key>ProgramArguments</key><array><string>%s</string><string>run-once</string></array>
   <key>StartInterval</key><integer>%d</integer>
   <key>RunAtLoad</key><true/>
@@ -31,7 +31,7 @@ func InstallMac(execPath string, interval int) error {
 // UninstallMac unloads and removes the launchd plist.
 func UninstallMac() error {
 	home, _ := os.UserHomeDir()
-	plist := filepath.Join(home, "Library/LaunchAgents/co.wimcorp.promptagent.plist")
+	plist := filepath.Join(home, "Library/LaunchAgents/co.wimcorp.wim-backoffice-prompt-agent.plist")
 	_ = exec.Command("launchctl", "unload", plist).Run()
 	return os.Remove(plist)
 }

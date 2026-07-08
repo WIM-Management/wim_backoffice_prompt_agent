@@ -20,7 +20,7 @@ import (
 
 // Version은 릴리스 빌드 시 ldflags로 주입된다:
 //
-//	go build -ldflags "-X main.Version=v0.2.0" ./cmd/wim-prompt-agent
+//	go build -ldflags "-X main.Version=v0.2.0" ./cmd/wim-backoffice-prompt-agent
 //
 // 주입 없이 빌드하면 dev로 남아 로컬 빌드임을 드러낸다.
 var Version = "dev"
@@ -136,22 +136,22 @@ func cmdInstall(cfg config.Config) error {
 		if err := daemon.InstallMac(exe, intervalSec); err != nil {
 			return err
 		}
-		fmt.Println("Installed: co.wimcorp.promptagent (launchd)")
+		fmt.Println("Installed: co.wimcorp.wim-backoffice-prompt-agent (launchd)")
 	case "linux":
 		fmt.Printf("Installing systemd --user timer (interval %ds)...\n", intervalSec)
 		if err := daemon.InstallLinux(exe, intervalSec); err != nil {
 			return err
 		}
-		fmt.Println("Installed: wim-prompt-agent.timer (systemd --user)")
+		fmt.Println("Installed: wim-backoffice-prompt-agent.timer (systemd --user)")
 	case "windows":
 		fmt.Printf("Installing Task Scheduler task (interval %ds)...\n", intervalSec)
 		if err := daemon.InstallWindows(exe, intervalSec); err != nil {
 			return err
 		}
-		fmt.Println("Installed: WimPromptAgent (Task Scheduler)")
+		fmt.Println("Installed: WimBackofficePromptAgent (Task Scheduler)")
 	default:
 		fmt.Fprintf(os.Stderr, "Daemon install is not supported on %s.\n", runtime.GOOS)
-		fmt.Fprintln(os.Stderr, "Run `wim-prompt-agent run-once` manually or via your OS task scheduler.")
+		fmt.Fprintln(os.Stderr, "Run `wim-backoffice-prompt-agent run-once` manually or via your OS task scheduler.")
 		return fmt.Errorf("unsupported OS: %s", runtime.GOOS)
 	}
 	return nil
@@ -165,19 +165,19 @@ func cmdUninstall() error {
 		if err := daemon.UninstallMac(); err != nil {
 			return err
 		}
-		fmt.Println("Uninstalled: co.wimcorp.promptagent")
+		fmt.Println("Uninstalled: co.wimcorp.wim-backoffice-prompt-agent")
 	case "linux":
 		fmt.Println("Uninstalling systemd --user timer...")
 		if err := daemon.UninstallLinux(); err != nil {
 			return err
 		}
-		fmt.Println("Uninstalled: wim-prompt-agent.timer")
+		fmt.Println("Uninstalled: wim-backoffice-prompt-agent.timer")
 	case "windows":
 		fmt.Println("Uninstalling Task Scheduler task...")
 		if err := daemon.UninstallWindows(); err != nil {
 			return err
 		}
-		fmt.Println("Uninstalled: WimPromptAgent")
+		fmt.Println("Uninstalled: WimBackofficePromptAgent")
 	default:
 		return fmt.Errorf("unsupported OS: %s", runtime.GOOS)
 	}
@@ -186,7 +186,7 @@ func cmdUninstall() error {
 
 // cmdStatus prints basic agent status.
 func cmdStatus(cfg config.Config) {
-	fmt.Printf("wim-prompt-agent %s\n", Version)
+	fmt.Printf("wim-backoffice-prompt-agent %s\n", Version)
 	fmt.Printf("Dir:          %s\n", cfg.Dir)
 	fmt.Printf("BaseURL:      %s\n", cfg.BaseURL)
 	// client id는 기밀 아님 — 내장(릴리스)/env/미설정 진단용
@@ -197,7 +197,7 @@ func cmdStatus(cfg config.Config) {
 }
 
 func printUsage() {
-	fmt.Fprintln(os.Stderr, "Usage: wim-prompt-agent <command>")
+	fmt.Fprintln(os.Stderr, "Usage: wim-backoffice-prompt-agent <command>")
 	fmt.Fprintln(os.Stderr, "Commands:")
 	fmt.Fprintln(os.Stderr, "  enroll     Enroll this device with the WIM backend")
 	fmt.Fprintln(os.Stderr, "  install    Install periodic daemon (launchd/systemd/Task Scheduler)")

@@ -10,14 +10,14 @@ import (
 )
 
 // KeychainStore stores the device token as a DPAPI-encrypted file
-// (~/.wim-prompt-agent/device-token.dpapi). DPAPI(CryptProtectData)는
+// (~/.wim-backoffice-prompt-agent/device-token.dpapi). DPAPI(CryptProtectData)는
 // 현재 Windows 사용자 계정에 바인딩되므로 다른 계정/머신에서는 복호화되지 않는다.
 // darwin(security)·linux(secret-tool)처럼 외부 도구를 요구하지 않는 stdlib-only 경로.
 type KeychainStore struct{ path string }
 
 func NewKeychainStore() *KeychainStore {
 	home, _ := os.UserHomeDir()
-	return &KeychainStore{filepath.Join(home, ".wim-prompt-agent", "device-token.dpapi")}
+	return &KeychainStore{filepath.Join(home, ".wim-backoffice-prompt-agent", "device-token.dpapi")}
 }
 
 func (k *KeychainStore) Set(v string) error {
