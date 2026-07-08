@@ -122,6 +122,21 @@ func cmdEnroll(cfg config.Config) error {
 	return e.Run(label)
 }
 
+// ensureEnrolled makes sure a usable device token exists before installing the daemon.
+// No token → enroll. Token present → verify; only an explicit rejection re-enrolls
+// (a transient/offline failure keeps the existing token).
+func ensureEnrolled(cfg config.Config) error {
+	token, _ := enroll.NewKeychainStore().Get()
+	if token == "" {
+		return cmdEnroll(cfg)
+	}
+	if enroll.VerifyToken(cfg.BaseURL, token) == enroll.TokenRejected {
+		fmt.Println("기존 기기 등록이 만료·폐기되어 재등록합니다.")
+		return cmdEnroll(cfg)
+	}
+	return nil
+}
+
 // cmdInstall installs the periodic daemon for the current OS.
 func cmdInstall(cfg config.Config) error {
 	exe, err := os.Executable()
