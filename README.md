@@ -16,7 +16,9 @@ WIM 백오피스 **프롬프트 인사이트** 로컬 수집 에이전트.
 
 ## 설치 (릴리스 바이너리)
 
-[GitHub Releases](https://github.com/WIM-Management/wim_backoffice_prompt_agent/releases)에서 플랫폼별 바이너리를 받는다 (`darwin-arm64` / `darwin-amd64` / `linux-amd64` / `linux-arm64`(Jetson Orin 등), `SHA256SUMS`로 무결성 검증).
+[GitHub Releases](https://github.com/WIM-Management/wim_backoffice_prompt_agent/releases)에서 플랫폼별 바이너리를 받는다 (`darwin-arm64` / `darwin-amd64` / `linux-amd64` / `linux-arm64`(Jetson Orin 등) / `windows-amd64.exe`, `SHA256SUMS`로 무결성 검증).
+
+> **Windows 주의**: `enroll`·`run-once`·`status`는 동작하지만(디바이스 토큰은 DPAPI로 암호화해 `%USERPROFILE%\.wim-prompt-agent\device-token.dpapi`에 저장), **데몬 `install`은 아직 미지원(P2)** — 작업 스케줄러(Task Scheduler)에 `run-once`를 15분 주기로 직접 등록하거나 수동 실행한다.
 
 ```bash
 curl -L -o /usr/local/bin/wim-prompt-agent \
@@ -38,6 +40,9 @@ GOOS=darwin GOARCH=amd64 go build -o bin/wim-prompt-agent ./cmd/wim-prompt-agent
 # Linux (x86_64 / arm64 — Jetson Orin 등)
 GOOS=linux GOARCH=amd64 go build -o bin/wim-prompt-agent ./cmd/wim-prompt-agent
 GOOS=linux GOARCH=arm64 go build -o bin/wim-prompt-agent ./cmd/wim-prompt-agent
+
+# Windows
+GOOS=windows GOARCH=amd64 go build -o bin/wim-prompt-agent.exe ./cmd/wim-prompt-agent
 ```
 
 Go 1.22+ 필요. **외부 의존성 없음**(`go.mod` 표준 라이브러리만).
@@ -46,7 +51,7 @@ Go 1.22+ 필요. **외부 의존성 없음**(`go.mod` 표준 라이브러리만)
 
 ## 릴리스
 
-`v*` 태그를 push하면 GitHub Actions([release.yml](.github/workflows/release.yml))가 테스트 → OS별 바이너리 4종(`darwin-arm64`/`darwin-amd64`/`linux-amd64`/`linux-arm64`) 빌드 → `SHA256SUMS` 생성 → GitHub Release 발행까지 자동으로 합니다. 수동 빌드·업로드 불필요.
+`v*` 태그를 push하면 GitHub Actions([release.yml](.github/workflows/release.yml))가 테스트 → OS별 바이너리 5종(`darwin-arm64`/`darwin-amd64`/`linux-amd64`/`linux-arm64`/`windows-amd64.exe`) 빌드 → `SHA256SUMS` 생성 → GitHub Release 발행까지 자동으로 합니다. 수동 빌드·업로드 불필요.
 
 ```bash
 git tag v0.2.0
