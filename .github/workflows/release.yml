@@ -48,17 +48,25 @@ jobs:
           done
           cd dist && sha256sum wim-prompt-agent-* > SHA256SUMS
 
-      - name: Create or update release
+      - name: Publish release to public distribution repo
         env:
-          GH_TOKEN: ${{ github.token }}
+          # 릴리스는 이 repo(private)가 아니라 공개 배포 레포에만 발행한다 —
+          # 전 사원(비 org 멤버 포함)이 인증 없이 다운로드하기 위함. 소스·태그는 여기 유지.
+          # RELEASES_TOKEN: 배포 레포에 쓰기 가능한 토큰(repo secret).
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          DIST_REPO: WIM-Management/wim_backoffice_prompt_agent_releases
         run: |
-          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            # 수동 선생성된 릴리스가 있으면 자산만 교체 업로드
-            gh release upload "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::RELEASES_TOKEN repo secret이 비어 있음 — 배포 레포에 발행 불가"
+            exit 1
+          fi
+          if gh release view "$GITHUB_REF_NAME" --repo "$DIST_REPO" >/dev/null 2>&1; then
+            # 선생성된 릴리스가 있으면 자산만 교체 업로드
+            gh release upload "$GITHUB_REF_NAME" dist/* --repo "$DIST_REPO" --clobber
           else
+            # 배포 레포엔 소스 태그가 없으므로 --verify-tag 없이 생성(태그는 배포 레포 HEAD에 생김)
             gh release create "$GITHUB_REF_NAME" dist/* \
-              --repo "$GITHUB_REPOSITORY" \
+              --repo "$DIST_REPO" \
               --title "$GITHUB_REF_NAME" \
-              --generate-notes \
-              --verify-tag
+              --notes "wim-prompt-agent $GITHUB_REF_NAME — OS별 바이너리 5종 + SHA256SUMS. 설치는 배포 레포 README의 원라이너 사용 권장."
           fi
