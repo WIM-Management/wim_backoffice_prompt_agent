@@ -18,7 +18,7 @@ WIM 백오피스 **프롬프트 인사이트** 로컬 수집 에이전트.
 
 [GitHub Releases](https://github.com/WIM-Management/wim_backoffice_prompt_agent/releases)에서 플랫폼별 바이너리를 받는다 (`darwin-arm64` / `darwin-amd64` / `linux-amd64` / `linux-arm64`(Jetson Orin 등) / `windows-amd64.exe`, `SHA256SUMS`로 무결성 검증).
 
-> **Windows 주의**: `enroll`·`run-once`·`status`는 동작하지만(디바이스 토큰은 DPAPI로 암호화해 `%USERPROFILE%\.wim-prompt-agent\device-token.dpapi`에 저장), **데몬 `install`은 아직 미지원(P2)** — 작업 스케줄러(Task Scheduler)에 `run-once`를 15분 주기로 직접 등록하거나 수동 실행한다.
+> **Windows**: 디바이스 토큰은 DPAPI로 암호화해 `%USERPROFILE%\.wim-prompt-agent\device-token.dpapi`에 저장하고, `install`은 작업 스케줄러(Task Scheduler)에 `WimPromptAgent` 태스크를 등록한다(관리자 권한 불필요). 콘솔 앱 특성상 주기 실행 순간 창이 잠깐 떴다 사라질 수 있다.
 
 ```bash
 curl -L -o /usr/local/bin/wim-prompt-agent \
@@ -63,6 +63,12 @@ git push origin v0.2.0
 ## 명령어
 
 ### `enroll` — 이 디바이스를 백엔드에 등록
+
+```bash
+./wim-prompt-agent enroll
+```
+
+**릴리스 바이너리는 env 설정이 필요 없다** — Google OAuth 클라이언트 id/secret이 릴리스 빌드에 내장돼 있다(CI가 repo secrets `WIM_PROMPT_GOOGLE_CLIENT_ID/SECRET`를 ldflags `-X internal/config.DefaultGoogleClientID/Secret`으로 주입; 데스크톱 앱 client secret은 Google 정책상 기밀 아님). 로컬 개발 빌드이거나 다른 클라이언트/백엔드를 쓰려면 env로 override:
 
 ```bash
 export WIM_PROMPT_GOOGLE_CLIENT_ID=<desktop-client-id>

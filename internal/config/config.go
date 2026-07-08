@@ -6,6 +6,16 @@ import (
 	"time"
 )
 
+// 릴리스 빌드 시 ldflags로 주입되는 내장 OAuth 클라이언트 기본값.
+// 데스크톱 앱 클라이언트의 secret은 Google 정책상 기밀이 아니므로 바이너리 내장이 허용된다.
+// env(WIM_PROMPT_GOOGLE_CLIENT_ID/SECRET)가 설정돼 있으면 env가 우선한다(로컬 개발·클라이언트 교체용).
+//
+//	go build -ldflags "-X .../internal/config.DefaultGoogleClientID=<id> -X .../internal/config.DefaultGoogleClientSecret=<secret>"
+var (
+	DefaultGoogleClientID     = ""
+	DefaultGoogleClientSecret = ""
+)
+
 // Config holds runtime configuration for wim-prompt-agent.
 type Config struct {
 	BaseURL      string
@@ -37,13 +47,22 @@ func Default() Config {
 		hd = "wimcorp.co.kr"
 	}
 
+	clientID := os.Getenv("WIM_PROMPT_GOOGLE_CLIENT_ID")
+	if clientID == "" {
+		clientID = DefaultGoogleClientID
+	}
+	clientSecret := os.Getenv("WIM_PROMPT_GOOGLE_CLIENT_SECRET")
+	if clientSecret == "" {
+		clientSecret = DefaultGoogleClientSecret
+	}
+
 	return Config{
 		BaseURL:            base,
 		ScanInterval:       15 * time.Minute,
 		IdleCutoff:         10 * time.Minute,
 		Dir:                dir,
-		GoogleClientID:     os.Getenv("WIM_PROMPT_GOOGLE_CLIENT_ID"),
-		GoogleClientSecret: os.Getenv("WIM_PROMPT_GOOGLE_CLIENT_SECRET"),
+		GoogleClientID:     clientID,
+		GoogleClientSecret: clientSecret,
 		GoogleHostedDomain: hd,
 	}
 }
