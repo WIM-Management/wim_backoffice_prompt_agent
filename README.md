@@ -77,7 +77,7 @@ git push origin v0.2.0
 ```bash
 export WIM_PROMPT_GOOGLE_CLIENT_ID=<desktop-client-id>
 export WIM_PROMPT_GOOGLE_CLIENT_SECRET=<desktop-client-secret>   # 데스크톱 client는 비밀 아님
-export WIM_PROMPT_BASE_URL=https://staging-backoffice-api.wimcorp.co.kr
+export WIM_PROMPT_BASE_URL=https://staging-backoffice-api.wimcorp.co.kr   # 기본은 prod — staging 테스트 시에만
 ./wim-prompt-agent enroll
 ```
 
@@ -103,7 +103,7 @@ Google OAuth 2.0 **PKCE loopback** 플로우를 실행합니다 — 브라우저
 ### `run-once` — 1회 스캔·마스킹·업로드
 
 ```bash
-WIM_PROMPT_BASE_URL=https://staging-backoffice-api.wimcorp.co.kr ./wim-prompt-agent run-once
+WIM_PROMPT_BASE_URL=https://staging-backoffice-api.wimcorp.co.kr ./wim-prompt-agent run-once   # staging 대상 테스트 예시
 ```
 
 전체 파이프라인을 1회 실행:
@@ -126,7 +126,7 @@ WIM_PROMPT_BASE_URL=https://staging-backoffice-api.wimcorp.co.kr ./wim-prompt-ag
 
 | 환경 변수                          | 기본값                                          | 설명                                       |
 |------------------------------------|-------------------------------------------------|--------------------------------------------|
-| `WIM_PROMPT_BASE_URL`              | `https://staging-backoffice-api.wimcorp.co.kr`  | enroll·업로드 대상 백엔드 base URL.         |
+| `WIM_PROMPT_BASE_URL`              | `https://backoffice-api.wimcorp.co.kr` (prod)  | enroll·업로드 대상 백엔드 base URL.         |
 | `WIM_PROMPT_GOOGLE_CLIENT_ID`      | (미설정)                                        | 데스크톱 OAuth client id (`enroll`에 필수). |
 | `WIM_PROMPT_GOOGLE_CLIENT_SECRET`  | (미설정)                                        | 데스크톱 OAuth client secret (비밀 아님).   |
 | `WIM_PROMPT_GOOGLE_HD`             | `wimcorp.co.kr`                                 | Google `hd` 호스티드 도메인 힌트.          |
