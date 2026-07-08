@@ -14,19 +14,31 @@ WIM 백오피스 **프롬프트 인사이트** 로컬 수집 에이전트.
 
 > 수집 대상은 **로컬 파일에 기록되는 도구**뿐입니다. 서버사이드 봇(Wimmy)·웹챗(claude.ai 웹)은 로컬에 세션이 안 남으므로 이 에이전트로는 수집되지 않습니다(범위 밖).
 
-## 설치 (릴리스 바이너리)
+## 설치 (원라이너)
 
-[GitHub Releases](https://github.com/WIM-Management/wim_backoffice_prompt_agent/releases)에서 플랫폼별 바이너리를 받는다 (`darwin-arm64` / `darwin-amd64` / `linux-amd64` / `linux-arm64`(Jetson Orin 등) / `windows-amd64.exe`, `SHA256SUMS`로 무결성 검증).
+private repo라 [gh CLI](https://cli.github.com) 로그인이 전제다 (`brew install gh` / `winget install GitHub.cli` → `gh auth login`).
+
+macOS / Linux:
+
+```bash
+gh api repos/WIM-Management/wim_backoffice_prompt_agent/contents/scripts/install.sh \
+  -H "Accept: application/vnd.github.raw" | bash
+```
+
+Windows (PowerShell):
+
+```powershell
+gh api repos/WIM-Management/wim_backoffice_prompt_agent/contents/scripts/install.ps1 `
+  -H "Accept: application/vnd.github.raw" | Out-String | Invoke-Expression
+```
+
+[`scripts/install.sh`](scripts/install.sh)·[`scripts/install.ps1`](scripts/install.ps1)이 최신 릴리스 바이너리 다운로드 → SHA256 검증 → PATH 배치(mac/linux는 `/usr/local/bin` 또는 `~/.local/bin`, windows는 `%LOCALAPPDATA%\wim-prompt-agent`+사용자 PATH) → `enroll`(브라우저 로그인) → `install`(데몬 등록)까지 한 번에 한다. 바이너리 설치까지만 하려면 `--no-setup`(sh) / `$env:WIM_PROMPT_NO_SETUP=1`(ps1).
 
 > **Windows**: 디바이스 토큰은 DPAPI로 암호화해 `%USERPROFILE%\.wim-prompt-agent\device-token.dpapi`에 저장하고, `install`은 작업 스케줄러(Task Scheduler)에 `WimPromptAgent` 태스크를 등록한다(관리자 권한 불필요). 콘솔 앱 특성상 주기 실행 순간 창이 잠깐 떴다 사라질 수 있다.
 
-```bash
-curl -L -o /usr/local/bin/wim-prompt-agent \
-  https://github.com/WIM-Management/wim_backoffice_prompt_agent/releases/latest/download/wim-prompt-agent-darwin-arm64
-chmod +x /usr/local/bin/wim-prompt-agent
-# macOS Gatekeeper가 미서명 바이너리를 차단하면:
-xattr -d com.apple.quarantine /usr/local/bin/wim-prompt-agent
-```
+### 수동 설치
+
+[GitHub Releases](https://github.com/WIM-Management/wim_backoffice_prompt_agent/releases)에서 플랫폼별 바이너리를 직접 받아도 된다 (`darwin-arm64` / `darwin-amd64` / `linux-amd64` / `linux-arm64`(Jetson Orin 등) / `windows-amd64.exe`, `SHA256SUMS`로 무결성 검증). private repo라 브라우저(로그인 세션) 또는 `gh release download`로 받는다 — 비인증 `curl`은 404.
 
 설치 후: `enroll`(기기 등록, Google 로그인) → `install`(15분 주기 백그라운드 수집). 아래 명령어 섹션 참고.
 
