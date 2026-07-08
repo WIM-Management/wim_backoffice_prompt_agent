@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"time"
 
 	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/adapter/claudecode"
 	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/config"
@@ -15,6 +16,7 @@ import (
 	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/redact"
 	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/scanner"
 	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/state"
+	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/updater"
 	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/uploader"
 )
 
@@ -55,6 +57,13 @@ func main() {
 	case "run-once":
 		if err := runOnce(cfg); err != nil {
 			fmt.Fprintln(os.Stderr, "run-once:", err)
+			os.Exit(1)
+		}
+		maybeSelfUpdate(cfg)
+
+	case "update":
+		if err := cmdUpdate(cfg); err != nil {
+			fmt.Fprintln(os.Stderr, "update:", err)
 			os.Exit(1)
 		}
 
@@ -99,6 +108,61 @@ func runOnce(cfg config.Config) error {
 	// 3) Upload queued events; failures leave files on disk for next run.
 	up := uploader.New(cfg.BaseURL, enroll.NewKeychainStore().Get, 100)
 	return q.Drain(func(b []model.Event) error { return up.Send(b) })
+}
+
+const updateCheckInterval = 24 * time.Hour
+
+// shouldCheckUpdate reports whether enough time passed since the last check.
+func shouldCheckUpdate(last, now time.Time) bool {
+	return now.Sub(last) >= updateCheckInterval
+}
+
+// maybeSelfUpdate is the silent auto-update path called after a successful
+// run-once. It checks at most once per updateCheckInterval and never fails the
+// caller — any error is logged and swallowed so collection is unaffected.
+func maybeSelfUpdate(cfg config.Config) {
+	store := state.New(filepath.Join(cfg.Dir, "state.json"))
+	d, err := store.Load()
+	if err != nil {
+		return
+	}
+	if !shouldCheckUpdate(d.LastUpdateCheck, time.Now()) {
+		return
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	res, err := updater.CheckAndUpdate(Version, exe)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "self-update 확인 실패(무시): %v\n", err)
+		return // state 미갱신 → 다음 run-once에서 재시도
+	}
+	if res.Updated {
+		fmt.Fprintf(os.Stderr, "self-update: %s → %s (다음 실행부터 적용)\n", res.From, res.To)
+	}
+	d.LastUpdateCheck = time.Now()
+	_ = store.Save(d)
+}
+
+// cmdUpdate is the manual `update` command: check now (no interval gate), print.
+func cmdUpdate(cfg config.Config) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	res, err := updater.CheckAndUpdate(Version, exe)
+	if err != nil {
+		return err
+	}
+	if res.Updated {
+		fmt.Printf("업데이트 완료: %s → %s (다음 실행부터 적용)\n", res.From, res.To)
+	} else if Version == "dev" {
+		fmt.Println("로컬(dev) 빌드는 self-update를 건너뜁니다.")
+	} else {
+		fmt.Printf("이미 최신입니다 (%s)\n", Version)
+	}
+	return nil
 }
 
 // cmdEnroll runs the device enrollment flow: Google OAuth PKCE loopback to get
@@ -241,6 +305,7 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "  install    Install periodic daemon (launchd/systemd/Task Scheduler)")
 	fmt.Fprintln(os.Stderr, "  uninstall  Remove periodic daemon")
 	fmt.Fprintln(os.Stderr, "  run-once   Scan, redact, and upload prompts once")
+	fmt.Fprintln(os.Stderr, "  update     Check for and install the latest release")
 	fmt.Fprintln(os.Stderr, "  status     Show current configuration")
 }
 
