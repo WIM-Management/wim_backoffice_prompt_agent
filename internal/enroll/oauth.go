@@ -96,16 +96,16 @@ func waitForCode(ln net.Listener, state string) (string, error) {
 	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		if e := q.Get("error"); e != "" {
-			fmt.Fprintf(w, "Authorization failed: %s. You may close this tab.", e)
+			writeCallbackPage(w, false, "등록에 실패했어요", "Google 인증이 거부되었습니다 ("+e+"). 이 탭을 닫고 터미널에서 다시 시도해 주세요.")
 			ch <- result{err: fmt.Errorf("oauth error: %s", e)}
 			return
 		}
 		if q.Get("state") != state {
-			fmt.Fprint(w, "State mismatch. You may close this tab.")
+			writeCallbackPage(w, false, "등록에 실패했어요", "인증 상태가 일치하지 않습니다. 이 탭을 닫고 터미널에서 다시 시도해 주세요.")
 			ch <- result{err: fmt.Errorf("oauth state mismatch")}
 			return
 		}
-		fmt.Fprint(w, "Enrolled. You may close this tab and return to the terminal.")
+		writeCallbackPage(w, true, "기기 등록 완료!", "이 탭을 닫으셔도 됩니다. 이제 15분마다 자동으로 수집됩니다.")
 		ch <- result{code: q.Get("code")}
 	})
 	srv.Handler = mux
@@ -184,4 +184,41 @@ func openBrowser(u string) error {
 		return fmt.Errorf("unsupported OS for browser open: %s", runtime.GOOS)
 	}
 	return exec.Command(cmd, append(args, u)...).Start()
+}
+
+// writeCallbackPage renders the browser-facing enroll result page.
+// 백오피스 프론트 테마(frontend src/utils/theme.ts의 다크 네이비+골드 팔레트)와 맞춘 카드형 페이지.
+func writeCallbackPage(w http.ResponseWriter, ok bool, title, msg string) {
+	// theme.ts 토큰: ink 11 17 32 · card 30 45 69 · border 42 63 95 · muted 185 200 220 ·
+	// body 245 249 255 · gold 240 180 41 · green 16 185 129 · red 239 68 68
+	icon, accent := "✓", "#10B981"
+	if !ok {
+		icon, accent = "✕", "#EF4444"
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	fmt.Fprintf(w, `<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WIM Backoffice · wim-prompt-agent</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<style>
+  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+         font-family:'Pretendard','Malgun Gothic','맑은 고딕',-apple-system,sans-serif;
+         background:rgb(11 17 32); color:rgb(245 249 255); }
+  .card { background:rgb(30 45 69); border:1px solid rgb(42 63 95); border-radius:14px;
+          padding:44px 52px; text-align:center; max-width:420px;
+          box-shadow:0 12px 40px rgb(0 0 0 / .45); }
+  .badge { width:60px; height:60px; border-radius:50%%; background:%s; color:#fff; font-size:30px;
+           line-height:60px; margin:0 auto 20px; font-weight:700; }
+  h1 { font-size:21px; font-weight:700; margin:0 0 10px; color:rgb(245 249 255); }
+  .sub { font-size:14.5px; color:rgb(185 200 220); margin:0; line-height:1.65; }
+  .brand { margin-top:26px; padding-top:18px; border-top:1px solid rgb(42 63 95);
+           font-size:12px; color:rgb(185 200 220 / .7); letter-spacing:.4px; }
+  .brand b { color:rgb(240 180 41); font-weight:600; }
+</style></head>
+<body><div class="card">
+  <div class="badge">%s</div>
+  <h1>%s</h1>
+  <p class="sub">%s</p>
+  <div class="brand"><b>WIM Backoffice</b> · wim-prompt-agent</div>
+</div></body></html>`, accent, icon, title, msg)
 }
