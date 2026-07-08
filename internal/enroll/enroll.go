@@ -88,9 +88,14 @@ const (
 // VerifyToken checks the stored device token against the backend's authenticated
 // cursor endpoint. Only an explicit 401/403 means "re-enroll"; transient failures
 // return TokenUnknown so a blip doesn't discard a healthy token.
+//
+// The cursor endpoint requires a `sourceTool` query param — without it the backend
+// returns 500 (binding error) regardless of auth, which would mask a real 401 as
+// TokenUnknown and silently disable rejection detection. We send CLAUDE_CODE (the
+// only collected tool); the returned cursor value is irrelevant, only the status.
 func VerifyToken(base, token string) TokenValidity {
 	hc := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, base+"/api/v1/prompt-insights/cursor", nil)
+	req, err := http.NewRequest(http.MethodGet, base+"/api/v1/prompt-insights/cursor?sourceTool=CLAUDE_CODE", nil)
 	if err != nil {
 		return TokenUnknown
 	}
