@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 )
 
 // TokenStore persists the device token (OS keychain in production, memory in tests).
@@ -71,3 +72,40 @@ type MemStore struct{ v string }
 func NewMemStore() *MemStore             { return &MemStore{} }
 func (m *MemStore) Get() (string, error) { return m.v, nil }
 func (m *MemStore) Set(v string) error   { m.v = v; return nil }
+
+// TokenValidity is the result of a server-side device-token check.
+type TokenValidity int
+
+const (
+	// TokenValid: server accepted the token (HTTP 200).
+	TokenValid TokenValidity = iota
+	// TokenRejected: server explicitly rejected the token (401/403) — re-enroll needed.
+	TokenRejected
+	// TokenUnknown: could not determine (network error, timeout, 5xx) — do NOT re-enroll.
+	TokenUnknown
+)
+
+// VerifyToken checks the stored device token against the backend's authenticated
+// cursor endpoint. Only an explicit 401/403 means "re-enroll"; transient failures
+// return TokenUnknown so a blip doesn't discard a healthy token.
+func VerifyToken(base, token string) TokenValidity {
+	hc := &http.Client{Timeout: 10 * time.Second}
+	req, err := http.NewRequest(http.MethodGet, base+"/api/v1/prompt-insights/cursor", nil)
+	if err != nil {
+		return TokenUnknown
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := hc.Do(req)
+	if err != nil {
+		return TokenUnknown
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return TokenValid
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return TokenRejected
+	default:
+		return TokenUnknown
+	}
+}

@@ -122,8 +122,39 @@ func cmdEnroll(cfg config.Config) error {
 	return e.Run(label)
 }
 
-// cmdInstall installs the periodic daemon for the current OS.
+// needsEnroll is the pure decision behind ensureEnrolled (unit-tested).
+// No token → enroll. Token present → re-enroll ONLY if the verifier explicitly
+// rejects it; a transient/offline failure (TokenUnknown) keeps the healthy token.
+// verify is lazy so an empty token never triggers a network call.
+func needsEnroll(token string, verify func() enroll.TokenValidity) bool {
+	if token == "" {
+		return true
+	}
+	return verify() == enroll.TokenRejected
+}
+
+// ensureEnrolled makes sure a usable device token exists before installing the daemon.
+func ensureEnrolled(cfg config.Config) error {
+	token, err := enroll.NewKeychainStore().Get()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "기기 토큰 조회 실패, 재등록 진행: %v\n", err)
+	}
+	if needsEnroll(token, func() enroll.TokenValidity { return enroll.VerifyToken(cfg.BaseURL, token) }) {
+		if token != "" {
+			fmt.Println("기존 기기 등록이 만료·폐기되어 재등록합니다.")
+		}
+		return cmdEnroll(cfg)
+	}
+	return nil
+}
+
+// cmdInstall ensures enrollment, installs the periodic daemon, then runs one
+// immediate collection so the first upload happens now (not up to an interval later).
 func cmdInstall(cfg config.Config) error {
+	if err := ensureEnrolled(cfg); err != nil {
+		return fmt.Errorf("enroll: %w", err)
+	}
+
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("resolve executable path: %w", err)
@@ -154,6 +185,13 @@ func cmdInstall(cfg config.Config) error {
 		fmt.Fprintln(os.Stderr, "Run `wim-backoffice-prompt-agent run-once` manually or via your OS task scheduler.")
 		return fmt.Errorf("unsupported OS: %s", runtime.GOOS)
 	}
+
+	// 즉시 첫 수집 — 실패해도 데몬이 다음 주기에 재시도하므로 경고만.
+	fmt.Println("첫 수집을 실행합니다...")
+	if err := runOnce(cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "첫 수집 실패(무시 — 다음 주기에 재시도): %v\n", err)
+	}
+	fmt.Println("✅ 설치 완료. 15분 주기로 자동 수집됩니다.")
 	return nil
 }
 
