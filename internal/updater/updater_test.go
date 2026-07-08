@@ -1,8 +1,14 @@
 package updater
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -38,5 +44,73 @@ func TestLatestVersionHTTPError(t *testing.T) {
 
 	if _, err := latestVersion(); err == nil {
 		t.Error("expected error on 500")
+	}
+}
+
+func TestDownloadAndVerifyChecksumMismatch(t *testing.T) {
+	body := []byte("new-binary-bytes")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case filepath.Base(r.URL.Path) == "SHA256SUMS":
+			// 틀린 해시 → 불일치
+			fmt.Fprintf(w, "%s  %s\n", "deadbeef", assetName())
+		default:
+			w.Write(body)
+		}
+	}))
+	defer srv.Close()
+	old := dlBase
+	dlBase = srv.URL
+	defer func() { dlBase = old }()
+
+	if _, err := downloadAndVerify(t.TempDir()); err == nil {
+		t.Error("expected checksum mismatch error")
+	}
+}
+
+func TestDownloadAndVerifyOK(t *testing.T) {
+	body := []byte("new-binary-bytes")
+	sum := sha256.Sum256(body)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if filepath.Base(r.URL.Path) == "SHA256SUMS" {
+			fmt.Fprintf(w, "%s  %s\n", hex.EncodeToString(sum[:]), assetName())
+			return
+		}
+		w.Write(body)
+	}))
+	defer srv.Close()
+	old := dlBase
+	dlBase = srv.URL
+	defer func() { dlBase = old }()
+
+	tmp, err := downloadAndVerify(t.TempDir())
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	got, _ := os.ReadFile(tmp)
+	if string(got) != string(body) {
+		t.Errorf("tmp content mismatch")
+	}
+}
+
+func TestReplaceBinaryUnix(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix-only")
+	}
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "agent")
+	tmp := filepath.Join(dir, "agent.new")
+	os.WriteFile(exe, []byte("old"), 0o755)
+	os.WriteFile(tmp, []byte("new"), 0o644)
+	if err := replaceBinary(tmp, exe); err != nil {
+		t.Fatalf("replace: %v", err)
+	}
+	got, _ := os.ReadFile(exe)
+	if string(got) != "new" {
+		t.Errorf("exe = %q, want new", got)
+	}
+	info, _ := os.Stat(exe)
+	if info.Mode().Perm() != 0o755 {
+		t.Errorf("perm = %v, want 0755", info.Mode().Perm())
 	}
 }
