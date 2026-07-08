@@ -167,7 +167,7 @@ func cmdInstall(cfg config.Config) error {
 		if err := daemon.InstallMac(exe, intervalSec); err != nil {
 			return err
 		}
-		fmt.Println("Installed: co.wimcorp.wim-backoffice-prompt-agent (launchd)")
+		fmt.Println("Installed: kr.co.wimcorp.wim-backoffice-prompt-agent (launchd)")
 	case "linux":
 		fmt.Printf("Installing systemd --user timer (interval %ds)...\n", intervalSec)
 		if err := daemon.InstallLinux(exe, intervalSec); err != nil {
@@ -203,7 +203,7 @@ func cmdUninstall() error {
 		if err := daemon.UninstallMac(); err != nil {
 			return err
 		}
-		fmt.Println("Uninstalled: co.wimcorp.wim-backoffice-prompt-agent")
+		fmt.Println("Uninstalled: kr.co.wimcorp.wim-backoffice-prompt-agent")
 	case "linux":
 		fmt.Println("Uninstalling systemd --user timer...")
 		if err := daemon.UninstallLinux(); err != nil {
