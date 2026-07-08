@@ -143,8 +143,14 @@ func cmdInstall(cfg config.Config) error {
 			return err
 		}
 		fmt.Println("Installed: wim-prompt-agent.timer (systemd --user)")
+	case "windows":
+		fmt.Printf("Installing Task Scheduler task (interval %ds)...\n", intervalSec)
+		if err := daemon.InstallWindows(exe, intervalSec); err != nil {
+			return err
+		}
+		fmt.Println("Installed: WimPromptAgent (Task Scheduler)")
 	default:
-		fmt.Fprintf(os.Stderr, "Daemon install is not supported on %s (P2).\n", runtime.GOOS)
+		fmt.Fprintf(os.Stderr, "Daemon install is not supported on %s.\n", runtime.GOOS)
 		fmt.Fprintln(os.Stderr, "Run `wim-prompt-agent run-once` manually or via your OS task scheduler.")
 		return fmt.Errorf("unsupported OS: %s", runtime.GOOS)
 	}
@@ -166,6 +172,12 @@ func cmdUninstall() error {
 			return err
 		}
 		fmt.Println("Uninstalled: wim-prompt-agent.timer")
+	case "windows":
+		fmt.Println("Uninstalling Task Scheduler task...")
+		if err := daemon.UninstallWindows(); err != nil {
+			return err
+		}
+		fmt.Println("Uninstalled: WimPromptAgent")
 	default:
 		return fmt.Errorf("unsupported OS: %s", runtime.GOOS)
 	}
@@ -177,6 +189,8 @@ func cmdStatus(cfg config.Config) {
 	fmt.Printf("wim-prompt-agent %s\n", Version)
 	fmt.Printf("Dir:          %s\n", cfg.Dir)
 	fmt.Printf("BaseURL:      %s\n", cfg.BaseURL)
+	// client id는 기밀 아님 — 내장(릴리스)/env/미설정 진단용
+	fmt.Printf("ClientID:     %s\n", clientIDStatus(cfg))
 	fmt.Printf("ScanInterval: %s\n", cfg.ScanInterval)
 	fmt.Printf("IdleCutoff:   %s\n", cfg.IdleCutoff)
 	fmt.Printf("OS:           %s\n", runtime.GOOS)
@@ -186,8 +200,19 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "Usage: wim-prompt-agent <command>")
 	fmt.Fprintln(os.Stderr, "Commands:")
 	fmt.Fprintln(os.Stderr, "  enroll     Enroll this device with the WIM backend")
-	fmt.Fprintln(os.Stderr, "  install    Install periodic daemon (launchd/systemd)")
+	fmt.Fprintln(os.Stderr, "  install    Install periodic daemon (launchd/systemd/Task Scheduler)")
 	fmt.Fprintln(os.Stderr, "  uninstall  Remove periodic daemon")
 	fmt.Fprintln(os.Stderr, "  run-once   Scan, redact, and upload prompts once")
 	fmt.Fprintln(os.Stderr, "  status     Show current configuration")
+}
+
+// clientIDStatus describes where the OAuth client id came from (diagnostics for enroll support).
+func clientIDStatus(cfg config.Config) string {
+	if cfg.GoogleClientID == "" {
+		return "(missing — env 또는 릴리스 바이너리 필요)"
+	}
+	if os.Getenv("WIM_PROMPT_GOOGLE_CLIENT_ID") != "" {
+		return cfg.GoogleClientID + " (env)"
+	}
+	return cfg.GoogleClientID + " (embedded)"
 }
