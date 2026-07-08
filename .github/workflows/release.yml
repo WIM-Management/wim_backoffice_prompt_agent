@@ -24,10 +24,10 @@ jobs:
       - name: Test
         run: go test ./...
 
-      - name: Build binaries (darwin arm64/amd64, linux amd64)
+      - name: Build binaries (darwin arm64/amd64, linux amd64/arm64)
         run: |
           mkdir -p dist
-          for target in darwin/arm64 darwin/amd64 linux/amd64; do
+          for target in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64; do
             GOOS="${target%/*}" GOARCH="${target#*/}" CGO_ENABLED=0 \
               go build -trimpath \
                 -ldflags "-s -w -X main.Version=${GITHUB_REF_NAME}" \
