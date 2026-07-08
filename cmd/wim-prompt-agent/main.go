@@ -18,7 +18,12 @@ import (
 	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/uploader"
 )
 
-const Version = "0.1.0"
+// Version은 릴리스 빌드 시 ldflags로 주입된다:
+//
+//	go build -ldflags "-X main.Version=v0.2.0" ./cmd/wim-prompt-agent
+//
+// 주입 없이 빌드하면 dev로 남아 로컬 빌드임을 드러낸다.
+var Version = "dev"
 
 func main() {
 	cfg := config.Default()
