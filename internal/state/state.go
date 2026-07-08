@@ -17,7 +17,7 @@ type FileState struct {
 type Data struct {
 	Files           map[string]FileState `json:"files"`
 	LastSentTs      map[string]string    `json:"lastSentTs"`
-	LastUpdateCheck time.Time            `json:"lastUpdateCheck,omitempty"`
+	LastUpdateCheck time.Time            `json:"lastUpdateCheck"`
 }
 
 type Store struct {

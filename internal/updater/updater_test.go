@@ -115,6 +115,25 @@ func TestReplaceBinaryUnix(t *testing.T) {
 	}
 }
 
+func TestIsNewer(t *testing.T) {
+	cases := []struct {
+		latest, current string
+		want            bool
+	}{
+		{"v0.5.0", "v0.4.2", true},
+		{"v0.4.2", "v0.4.2", false},        // 동일 → no-op
+		{"v0.4.1", "v0.4.2", false},        // 더 낮음 → 다운그레이드 금지
+		{"0.5.0", "v0.5.0", false},         // v 접두 정규화 → 동일
+		{"v1.0.0", "v0.9.9", true},
+		{"v0.10.0", "v0.9.0", true},        // 숫자 비교(문자열 아님)
+	}
+	for _, c := range cases {
+		if got := isNewer(c.latest, c.current); got != c.want {
+			t.Errorf("isNewer(%q,%q)=%v want %v", c.latest, c.current, got, c.want)
+		}
+	}
+}
+
 func TestCheckAndUpdateDevSkips(t *testing.T) {
 	r, err := CheckAndUpdate("dev", "/nonexistent")
 	if err != nil || r.Updated {

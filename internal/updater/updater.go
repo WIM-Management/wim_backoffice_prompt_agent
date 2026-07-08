@@ -11,11 +11,14 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
 
 const releasesRepo = "WIM-Management/wim_backoffice_prompt_agent_releases"
+
+const maxAssetBytes = 200 << 20 // 200 MB
 
 // apiBase is a var so tests can point it at httptest.
 var apiBase = "https://api.github.com"
@@ -64,8 +67,8 @@ func assetName() string {
 
 // downloadAndVerify fetches the platform asset + SHA256SUMS from the latest
 // release, writes the asset to a temp file in destDir, and verifies its hash.
-// On any failure it removes the temp file and returns an error — the caller's
-// binary is never touched until this returns nil.
+// On failure it returns before creating the temp file, so a failed download or
+// checksum leaves no artifact and never touches the caller's binary.
 func downloadAndVerify(destDir string) (string, error) {
 	base := fmt.Sprintf("%s/%s/releases/latest/download", dlBase, releasesRepo)
 	asset := assetName()
@@ -105,7 +108,7 @@ func httpGetBytes(url string) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("http %d", resp.StatusCode)
 	}
-	return io.ReadAll(resp.Body)
+	return io.ReadAll(io.LimitReader(resp.Body, maxAssetBytes))
 }
 
 // sumFor finds the hex digest for asset in SHA256SUMS content ("<hex>  <name>").
@@ -137,7 +140,7 @@ func CheckAndUpdate(currentVersion, execPath string) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	if latest == currentVersion {
+	if !isNewer(latest, currentVersion) {
 		return Result{Updated: false, From: currentVersion, To: latest}, nil
 	}
 	tmp, err := downloadAndVerify(filepath.Dir(execPath))
@@ -149,4 +152,30 @@ func CheckAndUpdate(currentVersion, execPath string) (Result, error) {
 		return Result{}, err
 	}
 	return Result{Updated: true, From: currentVersion, To: latest}, nil
+}
+
+// isNewer reports whether release tag `latest` is a strictly newer semver than
+// `current`. Both may carry a leading "v"; pre-release/build metadata is ignored.
+// Guards against a needless re-download on equal versions and a backward
+// "update" if releases/latest ever points at an older tag (yank/re-point).
+func isNewer(latest, current string) bool {
+	l, c := parseSemver(latest), parseSemver(current)
+	for i := 0; i < 3; i++ {
+		if l[i] != c[i] {
+			return l[i] > c[i]
+		}
+	}
+	return false
+}
+
+func parseSemver(v string) [3]int {
+	v = strings.TrimPrefix(v, "v")
+	if i := strings.IndexAny(v, "-+"); i >= 0 {
+		v = v[:i]
+	}
+	var out [3]int
+	for i, p := range strings.SplitN(v, ".", 3) {
+		out[i], _ = strconv.Atoi(p)
+	}
+	return out
 }
