@@ -12,11 +12,11 @@ import (
 type KeychainStore struct{ service, account string }
 
 func NewKeychainStore() *KeychainStore {
-	return &KeychainStore{"wim-prompt-agent", "device-token"}
+	return &KeychainStore{"wim-backoffice-prompt-agent", "device-token"}
 }
 
 func (k *KeychainStore) Set(v string) error {
-	cmd := exec.Command("secret-tool", "store", "--label=wim-prompt-agent",
+	cmd := exec.Command("secret-tool", "store", "--label=wim-backoffice-prompt-agent",
 		"service", k.service, "account", k.account)
 	cmd.Stdin = strings.NewReader(v)
 	return cmd.Run()

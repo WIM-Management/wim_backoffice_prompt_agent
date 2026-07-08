@@ -8,7 +8,7 @@ import (
 )
 
 // InstallLinux installs a systemd --user service + timer that runs
-// wim-prompt-agent run-once every intervalSec seconds.
+// wim-backoffice-prompt-agent run-once every intervalSec seconds.
 // loginctl enable-linger ensures the timer fires even when the user is logged out.
 func InstallLinux(execPath string, intervalSec int) error {
 	home, _ := os.UserHomeDir()
@@ -33,10 +33,10 @@ OnUnitActiveSec=%d
 WantedBy=timers.target
 `, intervalSec)
 
-	if err := os.WriteFile(filepath.Join(dir, "wim-prompt-agent.service"), []byte(svc), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "wim-backoffice-prompt-agent.service"), []byte(svc), 0o644); err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(dir, "wim-prompt-agent.timer"), []byte(timer), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "wim-backoffice-prompt-agent.timer"), []byte(timer), 0o644); err != nil {
 		return err
 	}
 
@@ -46,17 +46,17 @@ WantedBy=timers.target
 	if err := exec.Command("systemctl", "--user", "daemon-reload").Run(); err != nil {
 		return err
 	}
-	return exec.Command("systemctl", "--user", "enable", "--now", "wim-prompt-agent.timer").Run()
+	return exec.Command("systemctl", "--user", "enable", "--now", "wim-backoffice-prompt-agent.timer").Run()
 }
 
 // UninstallLinux stops and removes the systemd --user timer and service.
 func UninstallLinux() error {
-	_ = exec.Command("systemctl", "--user", "disable", "--now", "wim-prompt-agent.timer").Run()
+	_ = exec.Command("systemctl", "--user", "disable", "--now", "wim-backoffice-prompt-agent.timer").Run()
 	_ = exec.Command("systemctl", "--user", "daemon-reload").Run()
 
 	home, _ := os.UserHomeDir()
 	dir := filepath.Join(home, ".config/systemd/user")
-	_ = os.Remove(filepath.Join(dir, "wim-prompt-agent.timer"))
-	_ = os.Remove(filepath.Join(dir, "wim-prompt-agent.service"))
+	_ = os.Remove(filepath.Join(dir, "wim-backoffice-prompt-agent.timer"))
+	_ = os.Remove(filepath.Join(dir, "wim-backoffice-prompt-agent.service"))
 	return nil
 }

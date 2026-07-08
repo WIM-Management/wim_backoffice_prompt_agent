@@ -198,7 +198,7 @@ func writeCallbackPage(w http.ResponseWriter, ok bool, title, msg string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	fmt.Fprintf(w, `<!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>WIM Backoffice · wim-prompt-agent</title>
+<title>WIM Backoffice · wim-backoffice-prompt-agent</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
 <style>
   body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
@@ -219,6 +219,6 @@ func writeCallbackPage(w http.ResponseWriter, ok bool, title, msg string) {
   <div class="badge">%s</div>
   <h1>%s</h1>
   <p class="sub">%s</p>
-  <div class="brand"><b>WIM Backoffice</b> · wim-prompt-agent</div>
+  <div class="brand"><b>WIM Backoffice</b> · wim-backoffice-prompt-agent</div>
 </div></body></html>`, accent, icon, title, msg)
 }

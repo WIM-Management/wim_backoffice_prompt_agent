@@ -5,10 +5,10 @@ import (
 	"os/exec"
 )
 
-const windowsTaskName = "WimPromptAgent"
+const windowsTaskName = "WimBackofficePromptAgent"
 
 // InstallWindows registers a Windows Task Scheduler task that runs
-// wim-prompt-agent run-once every intervalSec seconds (rounded to minutes, min 1).
+// wim-backoffice-prompt-agent run-once every intervalSec seconds (rounded to minutes, min 1).
 // 사용자 세션 태스크라 관리자 권한이 필요 없다. 콘솔 앱 특성상 실행 순간
 // 창이 잠깐 떴다 사라질 수 있다(수집 자체엔 영향 없음).
 func InstallWindows(execPath string, intervalSec int) error {
