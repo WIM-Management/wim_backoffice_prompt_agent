@@ -118,3 +118,35 @@ func sumFor(sums, asset string) (string, error) {
 	}
 	return "", fmt.Errorf("no checksum for %s", asset)
 }
+
+// Result describes the outcome of a self-update attempt.
+type Result struct {
+	Updated bool
+	From    string
+	To      string
+}
+
+// CheckAndUpdate compares the running version to the latest release and, if
+// newer, downloads+verifies+replaces the binary at execPath. A "dev" build is
+// skipped. The temp download lives beside execPath so the final rename is atomic.
+func CheckAndUpdate(currentVersion, execPath string) (Result, error) {
+	if currentVersion == "dev" {
+		return Result{}, nil
+	}
+	latest, err := latestVersion()
+	if err != nil {
+		return Result{}, err
+	}
+	if latest == currentVersion {
+		return Result{Updated: false, From: currentVersion, To: latest}, nil
+	}
+	tmp, err := downloadAndVerify(filepath.Dir(execPath))
+	if err != nil {
+		return Result{}, err
+	}
+	if err := replaceBinary(tmp, execPath); err != nil {
+		_ = os.Remove(tmp)
+		return Result{}, err
+	}
+	return Result{Updated: true, From: currentVersion, To: latest}, nil
+}

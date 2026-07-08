@@ -114,3 +114,63 @@ func TestReplaceBinaryUnix(t *testing.T) {
 		t.Errorf("perm = %v, want 0755", info.Mode().Perm())
 	}
 }
+
+func TestCheckAndUpdateDevSkips(t *testing.T) {
+	r, err := CheckAndUpdate("dev", "/nonexistent")
+	if err != nil || r.Updated {
+		t.Errorf("dev build must skip: r=%+v err=%v", r, err)
+	}
+}
+
+func TestCheckAndUpdateAlreadyLatest(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"tag_name":"v1.0.0"}`))
+	}))
+	defer srv.Close()
+	oldA := apiBase
+	apiBase = srv.URL
+	defer func() { apiBase = oldA }()
+
+	r, err := CheckAndUpdate("v1.0.0", "/nonexistent")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if r.Updated {
+		t.Errorf("already latest must not update: %+v", r)
+	}
+}
+
+func TestCheckAndUpdatePerformsUpgrade(t *testing.T) {
+	body := []byte("v2-binary")
+	sum := sha256.Sum256(body)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/WIM-Management/wim_backoffice_prompt_agent_releases/releases/latest",
+		func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{"tag_name":"v2.0.0"}`)) })
+	mux.HandleFunc("/WIM-Management/wim_backoffice_prompt_agent_releases/releases/latest/download/"+assetName(),
+		func(w http.ResponseWriter, r *http.Request) { w.Write(body) })
+	mux.HandleFunc("/WIM-Management/wim_backoffice_prompt_agent_releases/releases/latest/download/SHA256SUMS",
+		func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprintf(w, "%s  %s\n", hex.EncodeToString(sum[:]), assetName())
+		})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	oldA, oldD := apiBase, dlBase
+	apiBase, dlBase = srv.URL, srv.URL
+	defer func() { apiBase, dlBase = oldA, oldD }()
+
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "agent")
+	os.WriteFile(exe, []byte("v1-binary"), 0o755)
+
+	r, err := CheckAndUpdate("v1.0.0", exe)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if !r.Updated || r.To != "v2.0.0" {
+		t.Errorf("expected upgrade to v2.0.0, got %+v", r)
+	}
+	got, _ := os.ReadFile(exe)
+	if string(got) != "v2-binary" {
+		t.Errorf("exe not replaced: %q", got)
+	}
+}
