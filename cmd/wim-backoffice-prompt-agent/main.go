@@ -58,11 +58,14 @@ func main() {
 		}
 
 	case "run-once":
-		if err := runOnce(cfg); err != nil {
+		err := runOnce(cfg)
+		// 부분 실패(한 폴더 토큰 만료 등)여도 self-update는 진행 — 한 폴더 실패가
+		// 나머지 폴더의 업데이트 수신까지 영구히 막지 않게 한다.
+		maybeSelfUpdate(cfg)
+		if err != nil {
 			fmt.Fprintln(os.Stderr, "run-once:", err)
 			os.Exit(1)
 		}
-		maybeSelfUpdate(cfg)
 
 	case "update":
 		if err := cmdUpdate(cfg); err != nil {
@@ -283,7 +286,10 @@ func cmdForget(cfg config.Config, configDir string) error {
 	if err := enroll.NewKeychainStore(removed.TokenKey).Delete(); err != nil {
 		fmt.Fprintf(os.Stderr, "토큰 삭제 경고: %v\n", err)
 	}
-	_ = os.RemoveAll(queueDirFor(cfg, removed)) // 잔여 큐 정리(best-effort)
+	if err := os.RemoveAll(queueDirFor(cfg, removed)); err != nil {
+		// 잔여 큐를 못 지우면 그 이벤트는 다시 드레인되지 않으니(폴더 등록해제됨) 알린다.
+		fmt.Fprintf(os.Stderr, "잔여 큐 정리 경고(%s): %v\n", queueDirFor(cfg, removed), err)
+	}
 	fmt.Printf("🗑  forget 완료: %s (token=%s 삭제)\n", configDir, removed.TokenKey)
 	return nil
 }
