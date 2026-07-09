@@ -10,7 +10,7 @@ import (
 
 func parseFixture(t *testing.T, name string, idle time.Time) []model.Event {
 	t.Helper()
-	a := New()
+	a := New("") // Parse는 configDir 무관(경로 직접 지정)
 	evs, _, err := a.Parse(filepath.Join("testdata", name), 0, idle)
 	if err != nil {
 		t.Fatal(err)

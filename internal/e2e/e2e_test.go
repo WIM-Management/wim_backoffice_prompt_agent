@@ -79,7 +79,7 @@ func TestEndToEnd(t *testing.T) {
 	queueDir := filepath.Join(tmp, "queue")
 
 	sc := scanner.New(
-		[]model.Adapter{claudecode.New()},
+		[]model.Adapter{claudecode.New(filepath.Join(tmp, ".claude"))},
 		state.New(stateFile),
 		10*time.Minute,
 	)

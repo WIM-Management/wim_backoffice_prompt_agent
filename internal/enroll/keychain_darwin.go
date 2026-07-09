@@ -3,15 +3,21 @@
 package enroll
 
 import (
+	"errors"
 	"os/exec"
 	"strings"
 )
 
-// KeychainStore stores the device token in the macOS login keychain.
+// errSecItemNotFound: `security find-generic-password`가 항목이 없을 때 반환하는
+// 종료 코드(44). 미등록(정상)이므로 raw 에러가 아니라 빈 토큰으로 취급한다.
+const errSecItemNotFound = 44
+
+// KeychainStore stores a device token in the macOS login keychain, keyed by
+// account (key). service는 고정, account=key로 폴더별 토큰을 분리한다.
 type KeychainStore struct{ service, account string }
 
-func NewKeychainStore() *KeychainStore {
-	return &KeychainStore{"wim-backoffice-prompt-agent", "device-token"}
+func NewKeychainStore(key string) *KeychainStore {
+	return &KeychainStore{"wim-backoffice-prompt-agent", key}
 }
 
 func (k *KeychainStore) Set(v string) error {
@@ -25,8 +31,22 @@ func (k *KeychainStore) Set(v string) error {
 
 func (k *KeychainStore) Get() (string, error) {
 	out, err := exec.Command("security", "find-generic-password", "-s", k.service, "-a", k.account, "-w").Output()
+	var ee *exec.ExitError
+	if errors.As(err, &ee) && ee.ExitCode() == errSecItemNotFound {
+		return "", nil
+	}
 	if err != nil {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// Delete removes the keychain item. 미존재(exit 44)는 성공으로 간주(멱등).
+func (k *KeychainStore) Delete() error {
+	err := exec.Command("security", "delete-generic-password", "-s", k.service, "-a", k.account).Run()
+	var ee *exec.ExitError
+	if errors.As(err, &ee) && ee.ExitCode() == errSecItemNotFound {
+		return nil
+	}
+	return err
 }

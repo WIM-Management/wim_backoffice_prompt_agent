@@ -1,10 +1,12 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/adapter/claudecode"
@@ -14,6 +16,7 @@ import (
 	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/model"
 	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/queue"
 	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/redact"
+	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/registry"
 	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/scanner"
 	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/state"
 	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/updater"
@@ -37,7 +40,7 @@ func main() {
 
 	switch os.Args[1] {
 	case "enroll":
-		if err := cmdEnroll(cfg); err != nil {
+		if err := cmdEnrollDispatch(cfg, os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "enroll:", err)
 			os.Exit(1)
 		}
@@ -84,19 +87,39 @@ func runOnce(cfg config.Config) error {
 	if err := os.MkdirAll(cfg.Dir, 0o700); err != nil {
 		return fmt.Errorf("create agent dir: %w", err)
 	}
-
+	entries, err := registry.New(registryPath(cfg)).List()
+	if err != nil {
+		return fmt.Errorf("load registry: %w", err)
+	}
 	store := state.New(filepath.Join(cfg.Dir, "state.json"))
-	sc := scanner.New([]model.Adapter{claudecode.New()}, store, cfg.IdleCutoff)
-	q := queue.New(filepath.Join(cfg.Dir, "queue"))
+
+	// 폴더별 에러 격리: 한 폴더 실패가 다른 폴더 수집을 막지 않는다.
+	var failed []string
+	for _, e := range entries {
+		if err := collectDir(cfg, store, e); err != nil {
+			fmt.Fprintf(os.Stderr, "수집 실패 [%s]: %v\n", e.ConfigDir, err)
+			failed = append(failed, e.ConfigDir)
+		}
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("%d개 폴더 수집 실패: %s", len(failed), strings.Join(failed, ", "))
+	}
+	return nil
+}
+
+// collectDir runs one scan→redact→enqueue→commit→drain cycle for a single
+// registered config dir, uploading with THAT dir's token. Disk persistence
+// (Enqueue) precedes offset advance (commit) to guarantee zero loss on crash (§4.5).
+func collectDir(cfg config.Config, store *state.Store, e registry.Entry) error {
+	sc := scanner.New([]model.Adapter{claudecode.New(e.ConfigDir)}, store, cfg.IdleCutoff)
+	q := queue.New(queueDirFor(cfg, e))
 
 	evs, commit := sc.ScanOnce()
-
 	for i := range evs {
 		evs[i].PromptText = redact.Scrub(evs[i].PromptText)
 		evs[i].ResponseText = redact.Scrub(evs[i].ResponseText)
 		evs[i].ClientVersion = Version
 	}
-
 	// 1) Persist to disk first — no upload loss on crash.
 	if err := q.Enqueue(evs); err != nil {
 		return fmt.Errorf("enqueue: %w", err)
@@ -105,9 +128,35 @@ func runOnce(cfg config.Config) error {
 	if err := commit(); err != nil {
 		return fmt.Errorf("commit offset: %w", err)
 	}
-	// 3) Upload queued events; failures leave files on disk for next run.
-	up := uploader.New(cfg.BaseURL, enroll.NewKeychainStore().Get, 100)
+	// 3) Upload queued events with this dir's token; failures leave files for next run.
+	up := uploader.New(cfg.BaseURL, enroll.NewKeychainStore(e.TokenKey).Get, 100)
 	return q.Drain(func(b []model.Event) error { return up.Send(b) })
+}
+
+func registryPath(cfg config.Config) string { return filepath.Join(cfg.Dir, "registry.json") }
+
+// queueDirFor keeps the default dir on the legacy flat queue path (cfg.Dir/queue)
+// so existing queued files keep draining, and puts non-default dirs in per-slug
+// subdirs. A flat glob never matches the subdirs, so per-dir tokens never cross.
+func queueDirFor(cfg config.Config, e registry.Entry) string {
+	if e.TokenKey == registry.DefaultTokenKey {
+		return filepath.Join(cfg.Dir, "queue")
+	}
+	return filepath.Join(cfg.Dir, "queue", registry.Slug(e.ConfigDir))
+}
+
+// resolveConfigDir turns a --config-dir value into an absolute path: absolute
+// stays as-is, otherwise resolved under home (".claude-melle" -> ~/.claude-melle).
+// Empty -> the default ~/.claude.
+func resolveConfigDir(v string) string {
+	if v == "" {
+		return registry.DefaultConfigDir()
+	}
+	if filepath.IsAbs(v) {
+		return filepath.Clean(v)
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Clean(filepath.Join(home, v))
 }
 
 const updateCheckInterval = 24 * time.Hour
@@ -165,25 +214,78 @@ func cmdUpdate(cfg config.Config) error {
 	return nil
 }
 
-// cmdEnroll runs the device enrollment flow: Google OAuth PKCE loopback to get
-// an id_token, then backend enroll → prompt-agent token in the OS keychain.
-func cmdEnroll(cfg config.Config) error {
+// cmdEnrollDispatch parses `enroll` flags and routes to enroll or forget:
+//
+//	enroll [--config-dir <path>]           config 폴더 등록(기본 ~/.claude)
+//	enroll --forget --config-dir <path>    폴더 등록해제 + 토큰 삭제
+func cmdEnrollDispatch(cfg config.Config, argv []string) error {
+	fs := flag.NewFlagSet("enroll", flag.ContinueOnError)
+	dir := fs.String("config-dir", "", "Claude 설정 폴더(절대경로 또는 ~ 기준 이름, 기본 ~/.claude)")
+	forget := fs.Bool("forget", false, "해당 폴더 등록해제 + 토큰 삭제")
+	if err := fs.Parse(argv); err != nil {
+		return err
+	}
+	configDir := resolveConfigDir(*dir)
+	if *forget {
+		return cmdForget(cfg, configDir)
+	}
+	return cmdEnroll(cfg, configDir)
+}
+
+// cmdEnroll runs the device enrollment flow for one config dir: register it,
+// Google OAuth PKCE loopback → id_token → backend enroll → token stored under
+// the dir's token key. 폴더마다 다른 사람이 로그인하면 폴더별 토큰이 분리된다.
+func cmdEnroll(cfg config.Config, configDir string) error {
 	if cfg.GoogleClientID == "" {
 		return fmt.Errorf(
 			"OAuth client not configured — set WIM_PROMPT_GOOGLE_CLIENT_ID (and " +
 				"WIM_PROMPT_GOOGLE_CLIENT_SECRET) for the desktop OAuth client")
+	}
+	if err := os.MkdirAll(cfg.Dir, 0o700); err != nil {
+		return err
+	}
+	// 레지스트리 upsert 먼저 — slug 충돌 등을 OAuth 로그인 전에 걸러낸다.
+	entry, err := registry.New(registryPath(cfg)).Upsert(configDir)
+	if err != nil {
+		return err
 	}
 	oauth := enroll.OAuthConfig{
 		ClientID:     cfg.GoogleClientID,
 		ClientSecret: cfg.GoogleClientSecret,
 		HostedDomain: cfg.GoogleHostedDomain,
 	}
-	label, _ := os.Hostname()
-	if label == "" {
-		label = "unknown"
+	host, _ := os.Hostname()
+	if host == "" {
+		host = "unknown"
 	}
-	e := enroll.New(cfg.BaseURL, enroll.NewKeychainStore(), oauth.GoogleIDToken)
-	return e.Run(label)
+	label := host
+	if !registry.IsDefault(configDir) {
+		label = host + ":" + registry.Slug(configDir) // 백엔드에서 어느 폴더인지 식별
+	}
+	e := enroll.New(cfg.BaseURL, enroll.NewKeychainStore(entry.TokenKey), oauth.GoogleIDToken)
+	if err := e.Run(label); err != nil {
+		return err
+	}
+	fmt.Printf("✅ enroll 완료: %s (token=%s)\n", configDir, entry.TokenKey)
+	return nil
+}
+
+// cmdForget de-registers a config dir and deletes its token (직원 이탈 대비).
+func cmdForget(cfg config.Config, configDir string) error {
+	removed, ok, err := registry.New(registryPath(cfg)).Remove(configDir)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		fmt.Printf("등록되지 않은 폴더입니다: %s\n", configDir)
+		return nil
+	}
+	if err := enroll.NewKeychainStore(removed.TokenKey).Delete(); err != nil {
+		fmt.Fprintf(os.Stderr, "토큰 삭제 경고: %v\n", err)
+	}
+	_ = os.RemoveAll(queueDirFor(cfg, removed)) // 잔여 큐 정리(best-effort)
+	fmt.Printf("🗑  forget 완료: %s (token=%s 삭제)\n", configDir, removed.TokenKey)
+	return nil
 }
 
 // needsEnroll is the pure decision behind ensureEnrolled (unit-tested).
@@ -197,9 +299,10 @@ func needsEnroll(token string, verify func() enroll.TokenValidity) bool {
 	return verify() == enroll.TokenRejected
 }
 
-// ensureEnrolled makes sure a usable device token exists before installing the daemon.
+// ensureEnrolled makes sure a usable device token exists for the default
+// ~/.claude before installing the daemon. 추가 폴더는 설치 후 `enroll --config-dir`로.
 func ensureEnrolled(cfg config.Config) error {
-	token, err := enroll.NewKeychainStore().Get()
+	token, err := enroll.NewKeychainStore(registry.DefaultTokenKey).Get()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "기기 토큰 조회 실패, 재등록 진행: %v\n", err)
 	}
@@ -207,7 +310,7 @@ func ensureEnrolled(cfg config.Config) error {
 		if token != "" {
 			fmt.Println("기존 기기 등록이 만료·폐기되어 재등록합니다.")
 		}
-		return cmdEnroll(cfg)
+		return cmdEnroll(cfg, registry.DefaultConfigDir())
 	}
 	return nil
 }
@@ -296,17 +399,34 @@ func cmdStatus(cfg config.Config) {
 	fmt.Printf("ScanInterval: %s\n", cfg.ScanInterval)
 	fmt.Printf("IdleCutoff:   %s\n", cfg.IdleCutoff)
 	fmt.Printf("OS:           %s\n", runtime.GOOS)
+
+	// 등록된 config 폴더 + 각 토큰 유무
+	fmt.Println("Config dirs:")
+	entries, err := registry.New(registryPath(cfg)).List()
+	if err != nil {
+		fmt.Printf("  (레지스트리 조회 실패: %v)\n", err)
+		return
+	}
+	for _, e := range entries {
+		tok, _ := enroll.NewKeychainStore(e.TokenKey).Get()
+		mark := "no token"
+		if tok != "" {
+			mark = "enrolled"
+		}
+		fmt.Printf("  %-40s [%s] %s\n", e.ConfigDir, e.TokenKey, mark)
+	}
 }
 
 func printUsage() {
 	fmt.Fprintln(os.Stderr, "Usage: wim-backoffice-prompt-agent <command>")
 	fmt.Fprintln(os.Stderr, "Commands:")
-	fmt.Fprintln(os.Stderr, "  enroll     Enroll this device with the WIM backend")
+	fmt.Fprintln(os.Stderr, "  enroll [--config-dir <path>]           Enroll a Claude config dir (default ~/.claude)")
+	fmt.Fprintln(os.Stderr, "  enroll --forget --config-dir <path>    De-register a config dir + delete its token")
 	fmt.Fprintln(os.Stderr, "  install    Install periodic daemon (launchd/systemd/Task Scheduler)")
 	fmt.Fprintln(os.Stderr, "  uninstall  Remove periodic daemon")
-	fmt.Fprintln(os.Stderr, "  run-once   Scan, redact, and upload prompts once")
+	fmt.Fprintln(os.Stderr, "  run-once   Scan, redact, and upload prompts once (all enrolled dirs)")
 	fmt.Fprintln(os.Stderr, "  update     Check for and install the latest release")
-	fmt.Fprintln(os.Stderr, "  status     Show current configuration")
+	fmt.Fprintln(os.Stderr, "  status     Show current configuration + enrolled dirs")
 }
 
 // clientIDStatus describes where the OAuth client id came from (diagnostics for enroll support).

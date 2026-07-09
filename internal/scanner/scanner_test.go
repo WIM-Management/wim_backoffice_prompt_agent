@@ -48,7 +48,7 @@ func TestScanOnceReturnsCommit(t *testing.T) {
 
 // 로테이션: Parse 가 fromOffset>filesize 면 0부터 재스캔(spec §4.2/§8). 어댑터 단위 테스트.
 func TestClaudeCodeRotationReset(t *testing.T) {
-	a := claudecode.New()
+	a := claudecode.New("") // Parse는 configDir 무관(경로 직접 지정)
 	f := filepath.Join("..", "adapter", "claudecode", "testdata", "basic.jsonl")
 	fi, _ := os.Stat(f)
 	evs, _, err := a.Parse(f, fi.Size()+999, time.Time{}) // 과거 offset > 현재 크기
