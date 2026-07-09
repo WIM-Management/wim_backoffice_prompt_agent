@@ -31,7 +31,12 @@ func (k *KeychainStore) Set(v string) error {
 }
 
 func (k *KeychainStore) Get() (string, error) {
+	// 파일 없음 = 미등록(정상). raw 에러로 올리면 첫 설치의 ensureEnrolled가
+	// "기기 토큰 조회 실패"를 찍으므로, 미존재는 빈 토큰으로 조용히 반환한다.
 	out, err := os.ReadFile(k.path)
+	if os.IsNotExist(err) {
+		return "", nil
+	}
 	if err != nil {
 		return "", err
 	}

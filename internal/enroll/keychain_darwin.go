@@ -3,9 +3,14 @@
 package enroll
 
 import (
+	"errors"
 	"os/exec"
 	"strings"
 )
+
+// errSecItemNotFound: `security find-generic-password`가 항목이 없을 때 반환하는
+// 종료 코드(44). 미등록(정상)이므로 raw 에러가 아니라 빈 토큰으로 취급한다.
+const errSecItemNotFound = 44
 
 // KeychainStore stores the device token in the macOS login keychain.
 type KeychainStore struct{ service, account string }
@@ -25,6 +30,10 @@ func (k *KeychainStore) Set(v string) error {
 
 func (k *KeychainStore) Get() (string, error) {
 	out, err := exec.Command("security", "find-generic-password", "-s", k.service, "-a", k.account, "-w").Output()
+	var ee *exec.ExitError
+	if errors.As(err, &ee) && ee.ExitCode() == errSecItemNotFound {
+		return "", nil
+	}
 	if err != nil {
 		return "", err
 	}

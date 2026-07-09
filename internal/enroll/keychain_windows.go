@@ -32,7 +32,11 @@ func (k *KeychainStore) Set(v string) error {
 }
 
 func (k *KeychainStore) Get() (string, error) {
+	// 파일 없음 = 미등록(정상) — 빈 토큰으로 조용히 반환(linux/darwin과 동일 계약).
 	enc, err := os.ReadFile(k.path)
+	if os.IsNotExist(err) {
+		return "", nil
+	}
 	if err != nil {
 		return "", err
 	}
