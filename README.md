@@ -14,6 +14,8 @@ WIM 백오피스 **프롬프트 인사이트** 로컬 수집 에이전트.
 
 > 수집 대상은 **로컬 파일에 기록되는 도구**뿐입니다. 서버사이드 봇(Wimmy)·웹챗(claude.ai 웹)은 로컬에 세션이 안 남으므로 이 에이전트로는 수집되지 않습니다(범위 밖).
 
+> **보관 기간(30일) 제약**: Claude Code는 시작 시 `cleanupPeriodDays`(기본 **30일**)보다 오래된 세션 transcript를 자동 삭제합니다(판정 기준은 파일 mtime — 오래된 세션도 `--resume`로 다시 열면 갱신돼 살아남음). 따라서 이 에이전트가 읽을 수 있는 건 **최근 30일 내 세션뿐**이며, **설치 이전에 이미 만료된 과거 세션은 소급 수집이 불가능**합니다. 반대로 데몬이 30일 안에 한 번만 돌면 유실 없이 실시간 수집되므로, 만료가 문제되는 건 오직 과거 소급뿐입니다.
+
 ## 설치 (원라이너)
 
 릴리스는 공개 배포 레포 [**wim_backoffice_prompt_agent_releases**](https://github.com/WIM-Management/wim_backoffice_prompt_agent_releases)에만 발행된다 (이 repo는 소스+태그만, private). 인증·GitHub 계정 없이 설치 가능:
@@ -155,7 +157,9 @@ Claude Code의 jsonl은 깨끗한 채팅 로그가 아니라 다중화된 이벤
 
 ## 플랫폼 / 알려진 제약
 
-- **P1 = macOS + Linux**. Windows는 P2(`install`·`enroll`·키체인 미구현).
+- **지원 OS = macOS · Linux · Windows**(3종 모두 `enroll`·`install`·`run-once` 구현 완료). macOS/Linux가 P1, Windows가 P2로 이어서 구현됐다. Windows는 토큰을 OS 키체인 대신 DPAPI 파일로 저장하고 데몬은 작업 스케줄러(Task Scheduler)로 등록한다(위 설치 섹션 참고).
+- **수집 어댑터 = Claude Code만**. Codex·Cursor 등 타 도구 어댑터는 **미구현**(향후 확장 예정). 현재 수집원은 `~/.claude/projects/**/*.jsonl` 하나뿐이다.
+- **30일 보관 한계**: Claude Code가 30일(`cleanupPeriodDays` 기본값) 지난 transcript를 자동 삭제하므로, **에이전트 설치 이전의 오래된 세션은 소급 수집 불가**. 설치 이후엔 데몬 주기 스캔(15분)으로 만료 전에 전부 잡히므로 유실 없음. 보관을 늘리려면 각 머신 `~/.claude/settings.json`의 `cleanupPeriodDays`를 키워야 하며 이는 에이전트 범위 밖이다.
 - **Linux는 `libsecret-tools` 필요**(키체인 백엔드가 `secret-tool` 호출):
   ```bash
   sudo apt-get install libsecret-tools   # Debian/Ubuntu
