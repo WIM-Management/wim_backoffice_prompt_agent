@@ -12,7 +12,7 @@ import (
 // KeychainStore stores the device token as a DPAPI-encrypted file
 // (~/.wim-backoffice-prompt-agent/device-token.dpapi). DPAPI(CryptProtectData)는
 // 현재 Windows 사용자 계정에 바인딩되므로 다른 계정/머신에서는 복호화되지 않는다.
-// darwin(security)·linux(secret-tool)처럼 외부 도구를 요구하지 않는 stdlib-only 경로.
+// darwin(security keychain)·linux(0600 파일)처럼 외부 도구를 요구하지 않는 stdlib-only 경로.
 type KeychainStore struct{ path string }
 
 func NewKeychainStore() *KeychainStore {
