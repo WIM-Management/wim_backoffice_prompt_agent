@@ -9,15 +9,16 @@ import (
 	"unsafe"
 )
 
-// KeychainStore stores the device token as a DPAPI-encrypted file
-// (~/.wim-backoffice-prompt-agent/device-token.dpapi). DPAPI(CryptProtectData)는
+// KeychainStore stores a device token as a DPAPI-encrypted file
+// (~/.wim-backoffice-prompt-agent/<key>.dpapi). DPAPI(CryptProtectData)는
 // 현재 Windows 사용자 계정에 바인딩되므로 다른 계정/머신에서는 복호화되지 않는다.
 // darwin(security keychain)·linux(0600 파일)처럼 외부 도구를 요구하지 않는 stdlib-only 경로.
+// key로 폴더별 토큰을 분리한다(기본=device-token).
 type KeychainStore struct{ path string }
 
-func NewKeychainStore() *KeychainStore {
+func NewKeychainStore(key string) *KeychainStore {
 	home, _ := os.UserHomeDir()
-	return &KeychainStore{filepath.Join(home, ".wim-backoffice-prompt-agent", "device-token.dpapi")}
+	return &KeychainStore{filepath.Join(home, ".wim-backoffice-prompt-agent", key+".dpapi")}
 }
 
 func (k *KeychainStore) Set(v string) error {
@@ -32,7 +33,11 @@ func (k *KeychainStore) Set(v string) error {
 }
 
 func (k *KeychainStore) Get() (string, error) {
+	// 파일 없음 = 미등록(정상) — 빈 토큰으로 조용히 반환(linux/darwin과 동일 계약).
 	enc, err := os.ReadFile(k.path)
+	if os.IsNotExist(err) {
+		return "", nil
+	}
 	if err != nil {
 		return "", err
 	}
@@ -41,6 +46,14 @@ func (k *KeychainStore) Get() (string, error) {
 		return "", err
 	}
 	return string(dec), nil
+}
+
+// Delete removes the token file. 미존재는 성공으로 간주(멱등).
+func (k *KeychainStore) Delete() error {
+	if err := os.Remove(k.path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 // --- DPAPI (crypt32.dll) ---

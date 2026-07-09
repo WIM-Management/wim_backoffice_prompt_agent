@@ -90,6 +90,27 @@ Google OAuth 2.0 **PKCE loopback** 플로우를 실행합니다 — 브라우저
 - 백엔드가 그 client_id를 audience로 받아들이도록 Vault `oauth2.google.agent-client-id`에 같은 데스크톱 client_id 설정.
 - 백엔드 `employees`에 본인 행의 `email`이 채워져 있어야 함(없으면 enroll 500: "일치하는 직원이 없음").
 
+#### 공유 머신 — 여러 사람이 각자 폴더로 (`--config-dir`)
+
+한 머신을 여러 직원이 각자 다른 Claude 설정 폴더(`~/.claude`, `~/.claude-melle` …)로 쓸 때, **폴더마다 따로 enroll**하면 각 폴더의 프롬프트가 그 폴더 주인에게 귀속된다. 폴더별로 **다른 디바이스 토큰**이 저장된다.
+
+```bash
+# 기본 폴더(~/.claude) — 옵션 없이
+./wim-backoffice-prompt-agent enroll
+# 추가 폴더 — 그 사람이 자기 구글 계정으로 로그인
+./wim-backoffice-prompt-agent enroll --config-dir .claude-melle       # ~/.claude-melle 로 해석
+./wim-backoffice-prompt-agent enroll --config-dir /abs/path/.claude-x # 절대경로도 가능
+```
+
+- `--config-dir` 값은 **절대경로면 그대로**, 아니면 `~/` 기준으로 해석한다.
+- 등록된 폴더는 `~/.wim-backoffice-prompt-agent/registry.json`에 기록되며, **명시적으로 enroll한 폴더만** 수집한다(자동 발견 없음). `run-once`/데몬이 등록된 전 폴더를 각자 토큰으로 순회한다.
+- 데몬은 한 번만 `install`하면 되고, 인원 추가는 `enroll --config-dir`만 하면 된다(데몬 재설치 불필요).
+- 등록 해제 + 토큰 삭제:
+  ```bash
+  ./wim-backoffice-prompt-agent enroll --forget --config-dir .claude-melle
+  ```
+  (기본 `~/.claude`는 forget할 수 없다.)
+
 ### `install` / `uninstall` — 주기 데몬 등록/해제
 
 ```bash
@@ -108,13 +129,15 @@ Google OAuth 2.0 **PKCE loopback** 플로우를 실행합니다 — 브라우저
 WIM_PROMPT_BASE_URL=https://staging-backoffice-api.wimcorp.co.kr ./wim-backoffice-prompt-agent run-once   # staging 대상 테스트 예시
 ```
 
-전체 파이프라인을 1회 실행:
+전체 파이프라인을, **등록된 config 폴더마다** 1회 실행:
 
-1. `~/.claude/projects/**/*.jsonl`에서 **완결된 새 턴**을 스캔(다음 사람 프롬프트가 오거나 파일이 idle이면 완결로 판정).
+1. `<configDir>/projects/**/*.jsonl`에서 **완결된 새 턴**을 스캔(다음 사람 프롬프트가 오거나 파일이 idle이면 완결로 판정).
 2. 시크릿 패턴 마스킹(`sk-…`, PEM 키, GitHub 토큰, AWS 키).
-3. 이벤트를 `~/.wim-backoffice-prompt-agent/queue/`에 enqueue(디스크 영속).
+3. 이벤트를 큐에 enqueue(디스크 영속). 기본 폴더는 `queue/`, 추가 폴더는 `queue/<slug>/`.
 4. 파일별 byte offset을 `~/.wim-backoffice-prompt-agent/state.json`에 전진(**enqueue 성공 후에만** — 크래시 시 유실 0).
-5. 큐 드레인: 100건 배치로 백엔드 업로드. 일시 실패 시 큐 파일을 디스크에 남겨 다음 실행에 자동 재시도.
+5. 큐 드레인: 100건 배치로 **그 폴더의 토큰**으로 업로드. 일시 실패 시 큐 파일을 디스크에 남겨 다음 실행에 자동 재시도.
+
+폴더별로 격리 실행되므로, 한 폴더의 실패(토큰 만료 등)가 다른 폴더 수집을 막지 않는다.
 
 ### `status` — 현재 설정 표시
 
@@ -122,7 +145,7 @@ WIM_PROMPT_BASE_URL=https://staging-backoffice-api.wimcorp.co.kr ./wim-backoffic
 ./wim-backoffice-prompt-agent status
 ```
 
-버전·데이터 디렉터리·백엔드 URL·스캔 주기·OS를 출력합니다.
+버전·데이터 디렉터리·백엔드 URL·스캔 주기·OS와 **등록된 config 폴더 목록**(각 토큰 유무)을 출력합니다.
 
 ## 설정
 

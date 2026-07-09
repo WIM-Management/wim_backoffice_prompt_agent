@@ -11,16 +11,14 @@ import (
 	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/model"
 )
 
-type Adapter struct{}
+type Adapter struct{ configDir string }
 
-func New() *Adapter             { return &Adapter{} }
-func (a *Adapter) Name() string { return "CLAUDE_CODE" }
+// New builds an adapter that scans <configDir>/projects/*/*.jsonl.
+// configDir is the resolved Claude config directory (e.g. ~/.claude, ~/.claude-melle).
+func New(configDir string) *Adapter { return &Adapter{configDir: configDir} }
+func (a *Adapter) Name() string     { return "CLAUDE_CODE" }
 func (a *Adapter) SessionPaths() ([]string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, err
-	}
-	return filepath.Glob(filepath.Join(home, ".claude", "projects", "*", "*.jsonl"))
+	return filepath.Glob(filepath.Join(a.configDir, "projects", "*", "*.jsonl"))
 }
 
 var syntheticMarkers = []string{
