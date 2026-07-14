@@ -123,7 +123,7 @@ func assemble(lines []rawLine, fileIdle bool) ([]model.Event, int) {
 	}
 
 	var out []model.Event
-	surface := firstEntrypoint(lines)
+	surface := normalizeSurface(firstEntrypoint(lines))
 	firstUnsettled := -1
 
 	for hi, idx := range humanIdx {
@@ -255,6 +255,18 @@ func firstEntrypoint(lines []rawLine) string {
 		}
 	}
 	return "unknown"
+}
+
+// normalizeSurface 는 Claude Code 트랜스크립트의 entrypoint 값을 알려진 surface 로만 통과시킨다.
+// 옛 클라이언트(v0.6.0 등)가 남긴 비정규 값(예: "claude-desktop")이 그대로 수집돼
+// 별도 수집 채널처럼 오해를 부르는 걸 막기 위해, allowlist 밖은 전부 "unknown" 으로 접는다.
+func normalizeSurface(s string) string {
+	switch s {
+	case "cli", "sdk-cli":
+		return s
+	default:
+		return "unknown"
+	}
 }
 
 func branchSuffix(b string) string {

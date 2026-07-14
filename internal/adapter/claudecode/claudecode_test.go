@@ -8,6 +8,22 @@ import (
 	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/model"
 )
 
+func TestNormalizeSurface(t *testing.T) {
+	cases := map[string]string{
+		"cli":            "cli",
+		"sdk-cli":        "sdk-cli",
+		"claude-desktop": "unknown", // 옛 v0.6.0 잔재 — 별도 채널 오해 방지로 접음
+		"unknown":        "unknown",
+		"":               "unknown",
+		"whatever-new":   "unknown", // 미래 이상값도 방어적으로 흡수
+	}
+	for in, want := range cases {
+		if got := normalizeSurface(in); got != want {
+			t.Errorf("normalizeSurface(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func parseFixture(t *testing.T, name string, idle time.Time) []model.Event {
 	t.Helper()
 	a := New("") // Parse는 configDir 무관(경로 직접 지정)
