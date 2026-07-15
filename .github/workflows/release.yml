@@ -38,11 +38,15 @@ jobs:
           CONFIG_PKG=github.com/WIM-Management/wim_backoffice_prompt_agent/internal/config
           mkdir -p dist
           for target in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64; do
-            goos="${target%/*}" goarch="${target#*/}" ext=""
-            if [ "$goos" = "windows" ]; then ext=".exe"; fi
+            goos="${target%/*}" goarch="${target#*/}" ext="" gui=""
+            # Windows: build with the GUI subsystem (-H=windowsgui) so the
+            # scheduled `run-once` doesn't flash a cmd console window every cycle.
+            # The binary reattaches to a parent console for interactive commands
+            # (see console_windows.go), so enroll output stays visible.
+            if [ "$goos" = "windows" ]; then ext=".exe" gui="-H=windowsgui"; fi
             GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 \
               go build -trimpath \
-                -ldflags "-s -w -X main.Version=${GITHUB_REF_NAME} -X ${CONFIG_PKG}.DefaultGoogleClientID=${GOOGLE_CLIENT_ID} -X ${CONFIG_PKG}.DefaultGoogleClientSecret=${GOOGLE_CLIENT_SECRET}" \
+                -ldflags "-s -w ${gui} -X main.Version=${GITHUB_REF_NAME} -X ${CONFIG_PKG}.DefaultGoogleClientID=${GOOGLE_CLIENT_ID} -X ${CONFIG_PKG}.DefaultGoogleClientSecret=${GOOGLE_CLIENT_SECRET}" \
                 -o "dist/wim-backoffice-prompt-agent-${goos}-${goarch}${ext}" \
                 ./cmd/wim-backoffice-prompt-agent
           done
