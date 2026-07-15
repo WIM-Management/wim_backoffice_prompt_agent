@@ -12,6 +12,7 @@ import (
 	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/adapter/claudecode"
 	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/adapter/codex"
 	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/adapter/gemini"
+	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/agentlog"
 	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/config"
 	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/daemon"
 	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/enroll"
@@ -33,7 +34,18 @@ import (
 var Version = "dev"
 
 func main() {
+	// Windows: the release binary is built -H=windowsgui (no console window on
+	// scheduled runs). Reattach to the parent terminal's console if we were
+	// launched from one, so interactive command output stays visible. No-op
+	// elsewhere and for consoleless scheduled runs.
+	attachParentConsole()
+
 	cfg := config.Default()
+
+	// Daemon-path diagnostics (run-once / self-update) go to <dir>/agent.log —
+	// scheduled runs have no console to print to. Interactive commands still use
+	// stdout/stderr directly.
+	agentlog.Setup(cfg.Dir)
 
 	if len(os.Args) < 2 {
 		printUsage()
@@ -65,7 +77,7 @@ func main() {
 		// 나머지 폴더의 업데이트 수신까지 영구히 막지 않게 한다.
 		maybeSelfUpdate(cfg)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "run-once:", err)
+			agentlog.Printf("run-once: %v", err)
 			os.Exit(1)
 		}
 
@@ -102,7 +114,7 @@ func runOnce(cfg config.Config) error {
 	var failed []string
 	for _, e := range entries {
 		if err := collectDir(cfg, store, e); err != nil {
-			fmt.Fprintf(os.Stderr, "수집 실패 [%s]: %v\n", e.ConfigDir, err)
+			agentlog.Printf("수집 실패 [%s]: %v", e.ConfigDir, err)
 			failed = append(failed, e.ConfigDir)
 		}
 	}
@@ -111,19 +123,19 @@ func runOnce(cfg config.Config) error {
 	home, homeErr := os.UserHomeDir()
 	if homeErr != nil {
 		// home을 못 구하면 codex/gemini 글롭이 빈 경로가 돼 엉뚱한 스캔이 되므로 머신 패스를 건너뛴다.
-		fmt.Fprintf(os.Stderr, "머신 수집 skip: home 디렉터리 결정 실패: %v\n", homeErr)
+		agentlog.Printf("머신 수집 skip: home 디렉터리 결정 실패: %v", homeErr)
 	} else if primary, ok := registry.PrimaryEntry(entries); ok {
 		if tok, err := enroll.NewKeychainStore(primary.TokenKey).Get(); err == nil && tok != "" {
 			machineAdapters := []model.Adapter{codex.New(home), gemini.New(home)}
 			if err := collectWith(cfg, store, primary, machineAdapters); err != nil {
-				fmt.Fprintf(os.Stderr, "머신 수집 실패 [codex/gemini]: %v\n", err)
+				agentlog.Printf("머신 수집 실패 [codex/gemini]: %v", err)
 				failed = append(failed, "codex/gemini")
 			}
 		} else {
-			fmt.Fprintf(os.Stderr, "머신 수집 skip: primary 토큰 없음 (codex/gemini 미수집)\n")
+			agentlog.Printf("머신 수집 skip: primary 토큰 없음 (codex/gemini 미수집)")
 		}
 	} else {
-		fmt.Fprintf(os.Stderr, "머신 수집 skip: primary 엔트리 없음\n")
+		agentlog.Printf("머신 수집 skip: primary 엔트리 없음")
 	}
 
 	if len(failed) > 0 {
@@ -215,11 +227,11 @@ func maybeSelfUpdate(cfg config.Config) {
 	}
 	res, err := updater.CheckAndUpdate(Version, exe)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "self-update 확인 실패(무시): %v\n", err)
+		agentlog.Printf("self-update 확인 실패(무시): %v", err)
 		return // state 미갱신 → 다음 run-once에서 재시도
 	}
 	if res.Updated {
-		fmt.Fprintf(os.Stderr, "self-update: %s → %s (다음 실행부터 적용)\n", res.From, res.To)
+		agentlog.Printf("self-update: %s → %s (다음 실행부터 적용)", res.From, res.To)
 	}
 	d.LastUpdateCheck = time.Now()
 	_ = store.Save(d)
@@ -367,7 +379,7 @@ func cmdInstall(cfg config.Config) error {
 	switch runtime.GOOS {
 	case "darwin":
 		fmt.Printf("Installing launchd agent (interval %ds)...\n", intervalSec)
-		if err := daemon.InstallMac(exe, intervalSec); err != nil {
+		if err := daemon.InstallMac(exe, intervalSec, filepath.Join(cfg.Dir, "agent.log")); err != nil {
 			return err
 		}
 		fmt.Println("Installed: kr.co.wimcorp.wim-backoffice-prompt-agent (launchd)")

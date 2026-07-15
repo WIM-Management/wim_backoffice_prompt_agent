@@ -34,7 +34,9 @@ irm https://raw.githubusercontent.com/WIM-Management/wim_backoffice_prompt_agent
 
 설치 스크립트(배포 레포의 `install.sh`/`install.ps1`)가 최신 릴리스 다운로드 → SHA256 검증 → PATH 배치(mac/linux는 `/usr/local/bin` 또는 `~/.local/bin`, windows는 `%LOCALAPPDATA%\wim-backoffice-prompt-agent`+사용자 PATH) → `enroll`(브라우저 로그인) → `install`(데몬 등록)까지 한 번에 한다. 바이너리 설치까지만 하려면 `--no-setup`(sh) / `$env:WIM_PROMPT_NO_SETUP=1`(ps1). **스크립트 수정은 배포 레포에서** — 이 repo엔 설치 스크립트를 두지 않는다(이중 소스 방지).
 
-> **Windows**: 디바이스 토큰은 DPAPI로 암호화해 `%USERPROFILE%\.wim-backoffice-prompt-agent\device-token.dpapi`에 저장하고, `install`은 작업 스케줄러(Task Scheduler)에 `WimBackofficePromptAgent` 태스크를 등록한다(관리자 권한 불필요). 콘솔 앱 특성상 주기 실행 순간 창이 잠깐 떴다 사라질 수 있다.
+> **Windows**: 디바이스 토큰은 DPAPI로 암호화해 `%USERPROFILE%\.wim-backoffice-prompt-agent\device-token.dpapi`에 저장하고, `install`은 작업 스케줄러(Task Scheduler)에 `WimBackofficePromptAgent` 태스크를 등록한다(관리자 권한 불필요). 릴리스 바이너리는 GUI 서브시스템(`-H=windowsgui`)으로 빌드되어 **주기 실행 시 콘솔 창이 뜨지 않는다.** 터미널에서 직접 실행하는 대화형 명령(`enroll` 등)은 부모 콘솔에 재연결해 출력이 정상적으로 보인다. 데몬(`run-once`) 진단 로그는 아래 `agent.log`로 남는다.
+>
+> 기존 설치본은 self-update로 새 바이너리를 받으면 창 깜빡임이 사라진다(작업 액션 변경 불필요). 즉시 우회가 필요하면 작업 액션을 `conhost.exe --headless "<exe>" run-once`로 바꿔도 된다.
 
 ## 빌드
 
@@ -47,8 +49,8 @@ GOOS=darwin GOARCH=amd64 go build -o bin/wim-backoffice-prompt-agent ./cmd/wim-b
 GOOS=linux GOARCH=amd64 go build -o bin/wim-backoffice-prompt-agent ./cmd/wim-backoffice-prompt-agent
 GOOS=linux GOARCH=arm64 go build -o bin/wim-backoffice-prompt-agent ./cmd/wim-backoffice-prompt-agent
 
-# Windows
-GOOS=windows GOARCH=amd64 go build -o bin/wim-backoffice-prompt-agent.exe ./cmd/wim-backoffice-prompt-agent
+# Windows (릴리스는 -H=windowsgui로 콘솔 창을 없앤다; 로컬 디버깅은 생략 가능)
+GOOS=windows GOARCH=amd64 go build -ldflags "-H=windowsgui" -o bin/wim-backoffice-prompt-agent.exe ./cmd/wim-backoffice-prompt-agent
 ```
 
 Go 1.22+ 필요. **외부 의존성 없음**(`go.mod` 표준 라이브러리만).
@@ -174,13 +176,17 @@ Claude Code의 jsonl은 깨끗한 채팅 로그가 아니라 다중화된 이벤
 ~/.wim-backoffice-prompt-agent/
   state.json        # 파일별 byte offset(스캐너 진행 상황)
   queue/            # 디스크 영속 이벤트 배치(자동 드레인)
+  agent.log         # 데몬(run-once/self-update) 진단 로그(5MB 초과 시 agent.log.1로 롤오버)
 ```
+
+데몬은 콘솔 없이(Windows GUI 빌드 / launchd·systemd) 돌기 때문에 진단 출력을 `agent.log`에 남긴다. 대화형 명령(`enroll`/`install`/`status`/`update`)은 터미널(stdout)로 바로 출력한다.
 
 토큰은 OS별로 저장합니다 — macOS는 login Keychain, Windows는 DPAPI 파일, Linux는 `~/.wim-backoffice-prompt-agent/device-token`(0600) 파일.
 
 ## 플랫폼 / 알려진 제약
 
 - **지원 OS = macOS · Linux · Windows**(3종 모두 `enroll`·`install`·`run-once` 구현 완료). macOS/Linux가 P1, Windows가 P2로 이어서 구현됐다. Windows는 토큰을 DPAPI 파일로 저장하고 데몬은 작업 스케줄러(Task Scheduler)로 등록한다(위 설치 섹션 참고). Linux는 토큰을 0600 파일로 저장한다(외부 도구 불필요, 아래 참고).
+- **macOS 백그라운드 항목 알림은 OS 정책 — 코드로 완전 제거 불가**. `install`이 등록하는 launchd 사용자 에이전트를 macOS(Ventura+)가 로그인/백그라운드 항목으로 취급해 "백그라운드 항목이 추가됨" 계열 알림을 띄운다. 15분 주기 실행 자체는 재등록하지 않으므로(=주기적 재알림 아님), self-update가 릴리스마다 바이너리를 교체할 때 재고지될 수 있는 정도다. 확인은 **시스템 설정 > 일반 > 로그인 항목**에서 가능하다. plist에 `StandardOutPath`/`StandardErrorPath`를 걸어 데몬 출력을 `agent.log`로 캡처하지만(재설치 시 반영), 알림 자체를 없애지는 못한다.
 - **수집 어댑터 = Claude Code만**. Codex·Cursor 등 타 도구 어댑터는 **미구현**(향후 확장 예정). 현재 수집원은 `~/.claude/projects/**/*.jsonl` 하나뿐이다.
 - **30일 보관 한계**: Claude Code가 30일(`cleanupPeriodDays` 기본값) 지난 transcript를 자동 삭제하므로, **에이전트 설치 이전의 오래된 세션은 소급 수집 불가**. 설치 이후엔 데몬 주기 스캔(15분)으로 만료 전에 전부 잡히므로 유실 없음. 보관을 늘리려면 각 머신 `~/.claude/settings.json`의 `cleanupPeriodDays`를 키워야 하며 이는 에이전트 범위 밖이다.
 - **Linux는 외부 의존성 없음**: 예전엔 `secret-tool`(libsecret)로 키링에 저장했으나, 실행 중인 secret service(gnome-keyring + D-Bus 세션)를 요구해 헤드리스 서버·SSH·WSL·컨테이너에서 못 썼다. 이제 `~/.wim-backoffice-prompt-agent/device-token`(0600 파일)에 저장하므로 데스크톱/헤드리스 무관하게 동작한다.
