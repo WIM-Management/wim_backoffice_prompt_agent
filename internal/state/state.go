@@ -9,9 +9,10 @@ import (
 )
 
 type FileState struct {
-	Offset int64 `json:"offset"`
-	Size   int64 `json:"size"`
-	Mtime  int64 `json:"mtime"`
+	Offset int64  `json:"offset"`
+	Size   int64  `json:"size"`
+	Mtime  int64  `json:"mtime"`
+	Cursor []byte `json:"cursor,omitempty"`
 }
 
 type Data struct {

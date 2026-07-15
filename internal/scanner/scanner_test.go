@@ -16,9 +16,9 @@ type fakeAdapter struct{ events int }
 func (f fakeAdapter) path() string                 { return "/fake/s.jsonl" }
 func (f fakeAdapter) Name() string                 { return "FAKE" }
 func (f fakeAdapter) SessionPaths() ([]string, error) { return []string{f.path()}, nil }
-func (f fakeAdapter) Parse(_ string, _ int64, _ time.Time) ([]model.Event, int64, error) {
+func (f fakeAdapter) Parse(_ string, _ []byte, _ time.Time) ([]model.Event, []byte, error) {
 	evs := make([]model.Event, f.events)
-	return evs, 123, nil // newOffset>0
+	return evs, []byte("123"), nil // newCursor>0
 }
 
 func stateStore(t *testing.T) *state.Store {
@@ -51,7 +51,7 @@ func TestClaudeCodeRotationReset(t *testing.T) {
 	a := claudecode.New("") // Parse는 configDir 무관(경로 직접 지정)
 	f := filepath.Join("..", "adapter", "claudecode", "testdata", "basic.jsonl")
 	fi, _ := os.Stat(f)
-	evs, _, err := a.Parse(f, fi.Size()+999, time.Time{}) // 과거 offset > 현재 크기
+	evs, _, err := a.Parse(f, state.EncodeByteCursor(fi.Size()+999), time.Time{}) // 과거 offset > 현재 크기
 	if err != nil {
 		t.Fatal(err)
 	}

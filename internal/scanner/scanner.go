@@ -30,12 +30,20 @@ func (s *Scanner) ScanOnce() ([]model.Event, func() error) {
 			continue
 		}
 		for _, p := range paths {
-			evs, newOff, err := ad.Parse(p, d.Files[p].Offset, idleCut)
+			cur := d.Files[p]
+			cursorArg := cur.Cursor
+			if len(cursorArg) == 0 && cur.Offset > 0 {
+				cursorArg = state.EncodeByteCursor(cur.Offset) // legacy migration: seed from old offset
+			}
+			evs, newCursor, err := ad.Parse(p, cursorArg, idleCut)
 			if err != nil {
 				continue
 			}
 			all = append(all, evs...)
-			pending[p] = state.FileState{Offset: newOff}
+			fs := cur // preserve Size/Mtime
+			fs.Cursor = newCursor
+			fs.Offset = state.DecodeByteCursor(newCursor, cur.Offset) // dual-write for legacy readers
+			pending[p] = fs
 		}
 	}
 	commit := func() error {
