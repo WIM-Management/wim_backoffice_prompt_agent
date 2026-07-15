@@ -16,11 +16,22 @@ import (
 )
 
 // Adapter implements model.Adapter for Google Gemini CLI (~/.gemini).
+//
+// SCAN-LIFETIME CONTRACT: one *Adapter instance corresponds to exactly one scan.
+// The cross-format winner map (sessionId -> authoritative file) is built lazily
+// once per instance and never invalidated, so a single instance MUST NOT be
+// reused across scan cycles — a session file created between scans would be
+// invisible to a stale map. The runtime honors this: the binary is `run-once`
+// (one scan per process, then exit; the daemon re-execs each interval) and the
+// wiring calls gemini.New(home) fresh inside every runOnce pass. Do not cache a
+// gemini.Adapter across scans without adding per-scan map invalidation.
+// (Resetting the map inside Parse would be wrong: Parse is called once per file
+// within a scan and all files of one scan must share the same winner map.)
 type Adapter struct {
 	home string
 
 	mu        sync.Mutex
-	winnerMap map[string]string // sessionId -> winning file path (lazy, built once per instance)
+	winnerMap map[string]string // sessionId -> winning file path (lazy, built once per instance — see scan-lifetime contract)
 }
 
 func New(home string) *Adapter { return &Adapter{home: home} }
@@ -127,6 +138,12 @@ func sessionIDFromFile(path string) string {
 
 	if strings.HasSuffix(path, ".json") {
 		// Monolithic: decode full JSON to get sessionId field.
+		// NOTE: nested chats/<uuid>/*.json files (glob D) are also routed here and
+		// are ASSUMED to share the monolithic schema ({sessionId, messages:[...]});
+		// no nested .json fixture exists in local data to confirm. Task 7 (full
+		// parsing) exercises message extraction and will surface any schema drift
+		// (a differing nested schema would yield empty sessionId here → its own
+		// winner bucket, not a crash).
 		var s monolithicSession
 		if json.NewDecoder(f).Decode(&s) == nil {
 			return s.SessionID
@@ -286,11 +303,9 @@ func (a *Adapter) parseJournal(file, sid string, cursor, newCursor []byte) ([]mo
 			continue
 		}
 
-		// Skip $set lines.
-		if bytes.Contains(line, []byte(`"$set"`)) {
-			continue
-		}
-
+		// $set journal-update lines carry no type:"user", so the type filter below
+		// skips them. We intentionally do NOT byte-match `"$set"` here: a genuine
+		// user prompt whose content quotes the literal "$set" must not be dropped.
 		var jl journalLine
 		if json.Unmarshal(line, &jl) != nil {
 			continue
