@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -250,5 +251,219 @@ func TestAuthoritativeSelection(t *testing.T) {
 
 	if pathPriority(best) != 0 {
 		t.Errorf("expected nested (priority 0) to win, got %q (priority %d)", best, pathPriority(best))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Task 7: Parse tests — pairing, injection filter, model, cwd
+// ---------------------------------------------------------------------------
+
+// TestParseInfoJournal verifies that info/$set/null/typeless/slash-command lines
+// are excluded and only the single real user→gemini pair is emitted.
+func TestParseInfoJournal(t *testing.T) {
+	home := t.TempDir()
+	chatsDir := filepath.Join(home, ".gemini", "tmp", "proj", "chats")
+
+	src, err := os.ReadFile("testdata/info_journal.jsonl")
+	if err != nil {
+		t.Fatalf("read testdata/info_journal.jsonl: %v", err)
+	}
+	writeFile(t, filepath.Join(chatsDir, "session-info.jsonl"), string(src))
+
+	a := New(home)
+	paths, err := a.SessionPaths()
+	if err != nil {
+		t.Fatalf("SessionPaths: %v", err)
+	}
+
+	var evs []interface{ GetFields() (string, string, string) }
+	type fields struct{ prompt, response, model string }
+	var got []fields
+	for _, p := range paths {
+		events, _, err := a.Parse(p, nil, time.Time{})
+		if err != nil {
+			t.Fatalf("Parse(%q): %v", p, err)
+		}
+		for _, e := range events {
+			got = append(got, fields{e.PromptText, e.ResponseText, e.Model})
+		}
+	}
+	_ = evs
+
+	if len(got) != 1 {
+		t.Fatalf("expected exactly 1 event, got %d: %+v", len(got), got)
+	}
+	g := got[0]
+	if g.prompt != "real gemini prompt" {
+		t.Errorf("PromptText = %q, want %q", g.prompt, "real gemini prompt")
+	}
+	if !strings.Contains(g.response, "sure, doing it") {
+		t.Errorf("ResponseText = %q, want to contain %q", g.response, "sure, doing it")
+	}
+	if g.model != "gemini-3-flash-preview" {
+		t.Errorf("Model = %q, want %q", g.model, "gemini-3-flash-preview")
+	}
+}
+
+// TestParseSlashCommandExcluded confirms a /help user message is not emitted.
+func TestParseSlashCommandExcluded(t *testing.T) {
+	home := t.TempDir()
+	chatsDir := filepath.Join(home, ".gemini", "tmp", "proj", "chats")
+
+	src, err := os.ReadFile("testdata/info_journal.jsonl")
+	if err != nil {
+		t.Fatalf("read testdata/info_journal.jsonl: %v", err)
+	}
+	writeFile(t, filepath.Join(chatsDir, "session-info.jsonl"), string(src))
+
+	a := New(home)
+	paths, _ := a.SessionPaths()
+	for _, p := range paths {
+		events, _, _ := a.Parse(p, nil, time.Time{})
+		for _, e := range events {
+			if strings.HasPrefix(e.PromptText, "/") {
+				t.Errorf("slash command leaked into events: PromptText=%q", e.PromptText)
+			}
+		}
+	}
+}
+
+// TestParseCwdFromDirectories verifies that directories[0] is used as ProjectContext.
+func TestParseCwdFromDirectories(t *testing.T) {
+	home := t.TempDir()
+	chatsDir := filepath.Join(home, ".gemini", "tmp", "myproj", "chats")
+
+	session := map[string]interface{}{
+		"sessionId":   "cwd-dir-session",
+		"directories": []string{"/Users/x/proj"},
+		"messages": []map[string]interface{}{
+			{"id": 1, "timestamp": 1720000010000, "type": "user", "content": "hello"},
+			{"id": 2, "timestamp": 1720000020000, "type": "gemini", "content": "hi", "model": "gemini-3-flash-preview"},
+		},
+	}
+	data, _ := json.Marshal(session)
+	writeFile(t, filepath.Join(chatsDir, "session-cwd.json"), string(data))
+
+	a := New(home)
+	paths, _ := a.SessionPaths()
+	for _, p := range paths {
+		events, _, err := a.Parse(p, nil, time.Time{})
+		if err != nil {
+			t.Fatalf("Parse: %v", err)
+		}
+		if len(events) != 1 {
+			t.Fatalf("expected 1 event, got %d", len(events))
+		}
+		if events[0].ProjectContext != "/Users/x/proj" {
+			t.Errorf("ProjectContext = %q, want %q", events[0].ProjectContext, "/Users/x/proj")
+		}
+	}
+}
+
+// TestParseCwdFromProjectRoot verifies that .project_root is read when directories is absent.
+func TestParseCwdFromProjectRoot(t *testing.T) {
+	home := t.TempDir()
+	projDir := "realproj"
+	chatsDir := filepath.Join(home, ".gemini", "tmp", projDir, "chats")
+
+	// Write .project_root
+	writeFile(t, filepath.Join(home, ".gemini", "tmp", projDir, ".project_root"), "/Users/x/realproj\n")
+
+	session := map[string]interface{}{
+		"sessionId": "cwd-root-session",
+		"messages": []map[string]interface{}{
+			{"id": 1, "timestamp": 1720000010000, "type": "user", "content": "hello"},
+			{"id": 2, "timestamp": 1720000020000, "type": "gemini", "content": "hi", "model": "gemini-3-flash-preview"},
+		},
+	}
+	data, _ := json.Marshal(session)
+	writeFile(t, filepath.Join(chatsDir, "session-root.json"), string(data))
+
+	a := New(home)
+	paths, _ := a.SessionPaths()
+	for _, p := range paths {
+		events, _, err := a.Parse(p, nil, time.Time{})
+		if err != nil {
+			t.Fatalf("Parse: %v", err)
+		}
+		if len(events) != 1 {
+			t.Fatalf("expected 1 event, got %d", len(events))
+		}
+		if events[0].ProjectContext != "/Users/x/realproj" {
+			t.Errorf("ProjectContext = %q, want %q", events[0].ProjectContext, "/Users/x/realproj")
+		}
+	}
+}
+
+// TestParseCwdFromProjectsJSON verifies the projects.json reverse-map fallback.
+func TestParseCwdFromProjectsJSON(t *testing.T) {
+	home := t.TempDir()
+	projDir := "proj"
+	chatsDir := filepath.Join(home, ".gemini", "tmp", projDir, "chats")
+
+	// Write projects.json — same shape as testdata/projects.json
+	writeFile(t, filepath.Join(home, ".gemini", "tmp", projDir, "projects.json"),
+		`{"projects":{"/Users/x/proj":"proj"}}`)
+
+	session := map[string]interface{}{
+		"sessionId": "cwd-pj-session",
+		"messages": []map[string]interface{}{
+			{"id": 1, "timestamp": 1720000010000, "type": "user", "content": "hello"},
+			{"id": 2, "timestamp": 1720000020000, "type": "gemini", "content": "hi", "model": "gemini-3-flash-preview"},
+		},
+	}
+	data, _ := json.Marshal(session)
+	writeFile(t, filepath.Join(chatsDir, "session-pj.json"), string(data))
+
+	a := New(home)
+	paths, _ := a.SessionPaths()
+	for _, p := range paths {
+		events, _, err := a.Parse(p, nil, time.Time{})
+		if err != nil {
+			t.Fatalf("Parse: %v", err)
+		}
+		if len(events) != 1 {
+			t.Fatalf("expected 1 event, got %d", len(events))
+		}
+		if events[0].ProjectContext != "/Users/x/proj" {
+			t.Errorf("ProjectContext = %q, want %q", events[0].ProjectContext, "/Users/x/proj")
+		}
+	}
+}
+
+// TestParseMultipleGeminiResponses verifies that multiple consecutive gemini
+// messages are joined and the first model is used.
+func TestParseMultipleGeminiResponses(t *testing.T) {
+	home := t.TempDir()
+	chatsDir := filepath.Join(home, ".gemini", "tmp", "proj", "chats")
+
+	session := map[string]interface{}{
+		"sessionId": "multi-resp-session",
+		"messages": []map[string]interface{}{
+			{"id": 1, "timestamp": 1720000010000, "type": "user", "content": "question"},
+			{"id": 2, "timestamp": 1720000020000, "type": "gemini", "content": "part one", "model": "gemini-3-flash-preview"},
+			{"id": 3, "timestamp": 1720000030000, "type": "gemini", "content": "part two", "model": "gemini-3-flash-other"},
+		},
+	}
+	data, _ := json.Marshal(session)
+	writeFile(t, filepath.Join(chatsDir, "session-multi.json"), string(data))
+
+	a := New(home)
+	paths, _ := a.SessionPaths()
+	for _, p := range paths {
+		events, _, err := a.Parse(p, nil, time.Time{})
+		if err != nil {
+			t.Fatalf("Parse: %v", err)
+		}
+		if len(events) != 1 {
+			t.Fatalf("expected 1 event, got %d", len(events))
+		}
+		e := events[0]
+		if !strings.Contains(e.ResponseText, "part one") || !strings.Contains(e.ResponseText, "part two") {
+			t.Errorf("ResponseText = %q, want both parts joined", e.ResponseText)
+		}
+		if e.Model != "gemini-3-flash-preview" {
+			t.Errorf("Model = %q, want first gemini model", e.Model)
+		}
 	}
 }

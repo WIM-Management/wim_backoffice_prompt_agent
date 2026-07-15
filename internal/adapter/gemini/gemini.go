@@ -31,7 +31,7 @@ type Adapter struct {
 	home string
 
 	mu        sync.Mutex
-	winnerMap map[string]string // sessionId -> winning file path (lazy, built once per instance — see scan-lifetime contract)
+	winnerMap map[string]string // sessionId -> winning file path (lazy, built once per instance)
 }
 
 func New(home string) *Adapter { return &Adapter{home: home} }
@@ -85,14 +85,9 @@ func pathPriority(p string) int {
 	base := filepath.Base(p)
 	parentBase := filepath.Base(dir)
 
-	// Nested: parent dir is neither "chats" itself, and the segment before the
-	// filename is not prefixed with "session-" (it's a uuid/short-id dir).
-	// Pattern: .../chats/<something>/<file> where <something> != "session-*"
-	// We detect "nested" when the immediate parent is NOT "chats".
 	if parentBase != "chats" {
 		return 0 // nested — highest priority
 	}
-	// Direct children of "chats/"
 	if strings.HasSuffix(base, ".json") {
 		return 1 // monolithic
 	}
@@ -101,8 +96,9 @@ func pathPriority(p string) int {
 
 // monolithicSession is the top-level structure of a monolithic .json file.
 type monolithicSession struct {
-	SessionID string             `json:"sessionId"`
-	Messages  []monolithicMsg    `json:"messages"`
+	SessionID   string          `json:"sessionId"`
+	Directories []string        `json:"directories,omitempty"`
+	Messages    []monolithicMsg `json:"messages"`
 }
 
 type monolithicMsg struct {
@@ -115,7 +111,8 @@ type monolithicMsg struct {
 
 // journalHeader is line 1 of a .jsonl file.
 type journalHeader struct {
-	SessionID string `json:"sessionId"`
+	SessionID   string   `json:"sessionId"`
+	Directories []string `json:"directories,omitempty"`
 }
 
 // journalLine covers both message lines and $set lines.
@@ -128,6 +125,20 @@ type journalLine struct {
 	Model     string           `json:"model,omitempty"`
 }
 
+// normalizedMsg is a unified message representation used by the pairing logic.
+type normalizedMsg struct {
+	Type      string
+	Content   json.RawMessage
+	Model     string
+	Timestamp int64
+}
+
+// offsetMsg wraps normalizedMsg with the byte offset of the line in a journal file.
+type offsetMsg struct {
+	normalizedMsg
+	lineOffset int64
+}
+
 // sessionIDFromFile reads just enough of a file to extract its sessionId.
 func sessionIDFromFile(path string) string {
 	f, err := os.Open(path)
@@ -137,13 +148,6 @@ func sessionIDFromFile(path string) string {
 	defer f.Close()
 
 	if strings.HasSuffix(path, ".json") {
-		// Monolithic: decode full JSON to get sessionId field.
-		// NOTE: nested chats/<uuid>/*.json files (glob D) are also routed here and
-		// are ASSUMED to share the monolithic schema ({sessionId, messages:[...]});
-		// no nested .json fixture exists in local data to confirm. Task 7 (full
-		// parsing) exercises message extraction and will surface any schema drift
-		// (a differing nested schema would yield empty sessionId here → its own
-		// winner bucket, not a crash).
 		var s monolithicSession
 		if json.NewDecoder(f).Decode(&s) == nil {
 			return s.SessionID
@@ -165,7 +169,6 @@ func sessionIDFromFile(path string) string {
 
 // buildWinnerMap scans all session paths and builds a sessionId -> file map,
 // where the file with the lowest pathPriority wins.
-// Must be called with a.mu held or during lazy init protected by mu.
 func (a *Adapter) buildWinnerMap() {
 	paths, err := a.SessionPaths()
 	if err != nil || len(paths) == 0 {
@@ -173,7 +176,6 @@ func (a *Adapter) buildWinnerMap() {
 		return
 	}
 
-	// Sort by priority ascending so we process highest-priority first.
 	sort.Slice(paths, func(i, j int) bool {
 		pi, pj := pathPriority(paths[i]), pathPriority(paths[j])
 		if pi != pj {
@@ -209,10 +211,8 @@ func (a *Adapter) ensureWinnerMap() {
 func (a *Adapter) Parse(file string, cursor []byte, idleCutoff time.Time) ([]model.Event, []byte, error) {
 	a.ensureWinnerMap()
 
-	// Determine the sessionId for this file.
 	sid := sessionIDFromFile(file)
 
-	// Check if this file is the winner for its sessionId.
 	a.mu.Lock()
 	winner, hasSID := a.winnerMap[sid]
 	a.mu.Unlock()
@@ -224,11 +224,9 @@ func (a *Adapter) Parse(file string, cursor []byte, idleCutoff time.Time) ([]mod
 	newCursor := state.EncodeByteCursor(fi.Size())
 
 	if sid == "" || !hasSID || winner != file {
-		// Non-winner: emit nothing.
 		return nil, newCursor, nil
 	}
 
-	// Parse the file.
 	if strings.HasSuffix(file, ".json") {
 		return a.parseMonolithic(file, sid, newCursor)
 	}
@@ -246,26 +244,24 @@ func (a *Adapter) parseMonolithic(file, sid string, newCursor []byte) ([]model.E
 		return nil, newCursor, err
 	}
 
-	var events []model.Event
-	for _, msg := range s.Messages {
-		if msg.Type != "user" {
-			continue
+	msgs := make([]normalizedMsg, len(s.Messages))
+	for i, m := range s.Messages {
+		msgs[i] = normalizedMsg{
+			Type:      m.Type,
+			Content:   m.Content,
+			Model:     m.Model,
+			Timestamp: m.Timestamp,
 		}
-		text := extractContent(msg.Content)
-		if text == "" {
-			continue
-		}
-		events = append(events, model.Event{
-			SourceTool: "GEMINI",
-			Surface:    "cli",
-			SessionID:  sid,
-			PromptText: text,
-			PromptTs:   msToNaiveTS(msg.Timestamp),
-		})
 	}
+
+	cwd := a.resolveCwd(file, s.Directories)
+	events := pairMessages(msgs, sid, cwd)
 	return events, newCursor, nil
 }
 
+// parseJournal parses a JSONL journal file with byte-cursor support.
+// All messages (user + gemini) are collected with their byte offsets so that
+// pairing is correct even when only a tail of the file is new.
 func (a *Adapter) parseJournal(file, sid string, cursor, newCursor []byte) ([]model.Event, []byte, error) {
 	fromOffset := state.DecodeByteCursor(cursor, 0)
 
@@ -278,19 +274,22 @@ func (a *Adapter) parseJournal(file, sid string, cursor, newCursor []byte) ([]mo
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 1<<20), 1<<20)
 
-	// Always skip header line (line 1) regardless of cursor.
-	// We track byte offset to respect cursor.
 	var offset int64
 	lineNum := 0
+	var dirs []string
+	var msgs []offsetMsg
 
-	var events []model.Event
 	for sc.Scan() {
 		line := sc.Bytes()
 		lineLen := int64(len(line)) + 1 // +1 for newline
 
 		lineNum++
 		if lineNum == 1 {
-			// Header line — skip.
+			// Header line — extract directories if present.
+			var h journalHeader
+			if json.Unmarshal(line, &h) == nil {
+				dirs = h.Directories
+			}
 			offset += lineLen
 			continue
 		}
@@ -298,34 +297,213 @@ func (a *Adapter) parseJournal(file, sid string, cursor, newCursor []byte) ([]mo
 		lineStart := offset
 		offset += lineLen
 
-		if lineStart < fromOffset {
-			// Already processed in a prior scan.
-			continue
-		}
-
-		// $set journal-update lines carry no type:"user", so the type filter below
-		// skips them. We intentionally do NOT byte-match `"$set"` here: a genuine
-		// user prompt whose content quotes the literal "$set" must not be dropped.
+		// $set journal-update lines carry no type:"user"/"gemini", so the type
+		// filter below skips them structurally. We do NOT byte-match "$set" to
+		// avoid false-positives on user prompts that quote the literal "$set".
 		var jl journalLine
 		if json.Unmarshal(line, &jl) != nil {
 			continue
 		}
-		if jl.Type != "user" {
+		if jl.Type != "user" && jl.Type != "gemini" {
 			continue
 		}
-		text := extractContent(jl.Content)
-		if text == "" {
-			continue
-		}
-		events = append(events, model.Event{
-			SourceTool: "GEMINI",
-			Surface:    "cli",
-			SessionID:  sid,
-			PromptText: text,
-			PromptTs:   msToNaiveTS(jl.Timestamp),
+
+		msgs = append(msgs, offsetMsg{
+			normalizedMsg: normalizedMsg{
+				Type:      jl.Type,
+				Content:   jl.Content,
+				Model:     jl.Model,
+				Timestamp: jl.Timestamp,
+			},
+			lineOffset: lineStart,
 		})
 	}
+
+	cwd := a.resolveCwd(file, dirs)
+
+	var events []model.Event
+	for i := 0; i < len(msgs); i++ {
+		om := msgs[i]
+		if om.Type != "user" {
+			continue
+		}
+
+		text := extractContent(om.Content)
+		if shouldSkipUserText(text) {
+			continue
+		}
+
+		// Cursor: only emit events whose user-message line is new.
+		if om.lineOffset < fromOffset {
+			continue
+		}
+
+		responseText, responseModel := collectGeminiResponsesOffset(msgs[i+1:])
+
+		events = append(events, model.Event{
+			SourceTool:     "GEMINI",
+			Surface:        "cli",
+			SessionID:      sid,
+			PromptText:     text,
+			ResponseText:   responseText,
+			Model:          responseModel,
+			PromptTs:       msToNaiveTS(om.Timestamp),
+			ProjectContext: cwd,
+		})
+	}
+
 	return events, newCursor, nil
+}
+
+// pairMessages walks a normalized message list and pairs user prompts with
+// following gemini responses. Used by parseMonolithic.
+func pairMessages(msgs []normalizedMsg, sid, cwd string) []model.Event {
+	var events []model.Event
+	for i := 0; i < len(msgs); i++ {
+		m := msgs[i]
+		if m.Type != "user" {
+			continue
+		}
+
+		text := extractContent(m.Content)
+		if shouldSkipUserText(text) {
+			continue
+		}
+
+		responseText, responseModel := collectGeminiResponses(msgs[i+1:])
+
+		events = append(events, model.Event{
+			SourceTool:     "GEMINI",
+			Surface:        "cli",
+			SessionID:      sid,
+			PromptText:     text,
+			ResponseText:   responseText,
+			Model:          responseModel,
+			PromptTs:       msToNaiveTS(m.Timestamp),
+			ProjectContext: cwd,
+		})
+	}
+	return events
+}
+
+// shouldSkipUserText returns true for messages that are injection artifacts
+// and should not be emitted as prompt events.
+//
+// Structural filter (primary): empty text and slash commands are reliably
+// identifiable by structure. The "System:" prefix is a best-effort supplement
+// to catch residual injection leaks that arrive as type=="user" messages; it
+// is NOT a general English-phrase blocklist.
+func shouldSkipUserText(text string) bool {
+	if text == "" {
+		return true
+	}
+	if strings.HasPrefix(text, "/") {
+		return true
+	}
+	// Best-effort supplement: catches residual System:-prefixed injection leaks.
+	if strings.HasPrefix(text, "System:") {
+		return true
+	}
+	return false
+}
+
+// collectGeminiResponses collects consecutive gemini messages from a
+// []normalizedMsg slice (stopping at the next user message) and returns
+// joined response text and the first non-empty model string.
+func collectGeminiResponses(msgs []normalizedMsg) (text, firstModel string) {
+	var sb strings.Builder
+	for _, m := range msgs {
+		if m.Type == "user" {
+			break
+		}
+		if m.Type != "gemini" {
+			continue
+		}
+		sb.WriteString(extractContent(m.Content))
+		if firstModel == "" && m.Model != "" {
+			firstModel = m.Model
+		}
+	}
+	return sb.String(), firstModel
+}
+
+// collectGeminiResponsesOffset is the offsetMsg variant used by parseJournal.
+func collectGeminiResponsesOffset(msgs []offsetMsg) (text, firstModel string) {
+	var sb strings.Builder
+	for _, m := range msgs {
+		if m.Type == "user" {
+			break
+		}
+		if m.Type != "gemini" {
+			continue
+		}
+		sb.WriteString(extractContent(m.Content))
+		if firstModel == "" && m.Model != "" {
+			firstModel = m.Model
+		}
+	}
+	return sb.String(), firstModel
+}
+
+// resolveCwd determines the working directory for a session file.
+//
+// Resolution order:
+//  1. directories[0] from the session file (most authoritative).
+//  2. Read <home>/.gemini/tmp/<projectDir>/.project_root (verified present in real data).
+//  3. projects.json reverse-map: {"projects":{"<abs path>":"<name>"}} → abs path for name==projectDir.
+//  4. <projectDir> basename as-is (approximate fallback).
+func (a *Adapter) resolveCwd(sessionFilePath string, directories []string) string {
+	// (a) directories array.
+	if len(directories) > 0 && directories[0] != "" {
+		return directories[0]
+	}
+
+	// Extract <projectDir> from path: .../tmp/<projectDir>/chats/...
+	tmpBase := filepath.Join(a.home, ".gemini", "tmp")
+	rel, err := filepath.Rel(tmpBase, sessionFilePath)
+	if err != nil {
+		return ""
+	}
+	parts := strings.SplitN(rel, string(filepath.Separator), 2)
+	if len(parts) == 0 || parts[0] == "" {
+		return ""
+	}
+	projectDir := parts[0]
+	tmpProjDir := filepath.Join(tmpBase, projectDir)
+
+	// (b) .project_root file — primary real-world source.
+	if data, err := os.ReadFile(filepath.Join(tmpProjDir, ".project_root")); err == nil {
+		if p := strings.TrimSpace(string(data)); p != "" {
+			return p
+		}
+	}
+
+	// (c) projects.json reverse-map.
+	if data, err := os.ReadFile(filepath.Join(tmpProjDir, "projects.json")); err == nil {
+		var pj struct {
+			Projects map[string]string `json:"projects"`
+		}
+		if json.Unmarshal(data, &pj) == nil {
+			var found string
+			collision := false
+			for absPath, name := range pj.Projects {
+				if name == projectDir {
+					if found == "" {
+						found = absPath
+					} else {
+						collision = true
+						break
+					}
+				}
+			}
+			if !collision && found != "" {
+				return found
+			}
+		}
+	}
+
+	// (d) basename fallback.
+	return projectDir
 }
 
 // extractContent converts a Gemini content field (string or [{text:...}]) to plain text.
