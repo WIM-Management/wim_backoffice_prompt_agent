@@ -40,6 +40,33 @@ func TestPrintfAppends(t *testing.T) {
 	}
 }
 
+func TestRotateFallsBackToTruncateWhenRenameFails(t *testing.T) {
+	dir := t.TempDir()
+	Setup(dir)
+	logPath := filepath.Join(dir, "agent.log")
+
+	// Occupy agent.log.1 with a non-empty directory so os.Rename can't clobber
+	// it → the truncate fallback must fire instead of unbounded growth.
+	if err := os.MkdirAll(logPath+".1/blocker", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(logPath, make([]byte, maxLogBytes+1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	Printf("after truncate")
+
+	b, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if len(b) > maxLogBytes {
+		t.Errorf("cap not enforced: log is %d bytes", len(b))
+	}
+	if !strings.Contains(string(b), "after truncate") {
+		t.Errorf("truncated log should hold the new line, got %d bytes", len(b))
+	}
+}
+
 func TestRotateAtSizeCap(t *testing.T) {
 	dir := t.TempDir()
 	Setup(dir)

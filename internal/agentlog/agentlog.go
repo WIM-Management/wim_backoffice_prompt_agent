@@ -53,10 +53,17 @@ func Printf(format string, args ...any) {
 
 // rotateIfNeeded renames path -> path.1 (single generation) once it exceeds the
 // size cap. Caller holds mu.
+//
+// If the rename fails (e.g. Windows ERROR_SHARING_VIOLATION when agent.log.1 is
+// open in a viewer), fall back to truncating agent.log in place. Without this the
+// cap would silently stop being enforced and — since scheduled Windows runs have
+// no console — the file would grow unbounded.
 func rotateIfNeeded() {
 	fi, err := os.Stat(path)
 	if err != nil || fi.Size() < maxLogBytes {
 		return
 	}
-	_ = os.Rename(path, path+".1")
+	if err := os.Rename(path, path+".1"); err != nil {
+		_ = os.Truncate(path, 0)
+	}
 }
