@@ -65,27 +65,35 @@ func (a *Adapter) Parse(file string, cursor []byte, idleCutoff time.Time) ([]mod
 	if err != nil {
 		return nil, cursor, err
 	}
+	// Rotation guard: only affects the emission gate (fromOffset), not the read.
 	if fromOffset > fi.Size() {
 		fromOffset = 0
 	}
+
+	// Always read from offset 0: session_meta is only on line 1 and must be
+	// available on every scan regardless of the fromOffset emission gate.
 	f, err := os.Open(file)
 	if err != nil {
 		return nil, cursor, err
 	}
 	defer f.Close()
-	if _, err := f.Seek(fromOffset, 0); err != nil {
-		return nil, cursor, err
-	}
 
+	fileIdle := fi.ModTime().Before(idleCutoff)
+
+	// Collect lines and their start byte offsets while reading from the top.
 	br := bufio.NewReader(f)
 	var lines []rawLine
+	var lineOffsets []int64
+	var pos int64
 	for {
 		b, rerr := br.ReadBytes('\n')
 		if len(b) > 0 {
 			var rl rawLine
 			if json.Unmarshal(b, &rl) == nil {
 				lines = append(lines, rl)
+				lineOffsets = append(lineOffsets, pos)
 			}
+			pos += int64(len(b))
 		}
 		if rerr != nil {
 			break
@@ -94,7 +102,7 @@ func (a *Adapter) Parse(file string, cursor []byte, idleCutoff time.Time) ([]mod
 
 	fileEnd := state.EncodeByteCursor(fi.Size())
 
-	// Parse session_meta from first line to determine if exec session.
+	// Parse session_meta (always at line 0; reading from 0 guarantees it's present).
 	var meta sessionMetaPayload
 	foundMeta := false
 	for _, l := range lines {
@@ -112,8 +120,14 @@ func (a *Adapter) Parse(file string, cursor []byte, idleCutoff time.Time) ([]mod
 	}
 
 	// Interactive session: pair user input_text → assistant output_text.
-	events := assembleEvents(lines, meta)
-	return events, fileEnd, nil
+	// assembleEvents returns the firstUnsettledOffset (-1 if everything settled).
+	events, firstUnsettledOffset := assembleEvents(lines, lineOffsets, meta, fromOffset, fileIdle)
+
+	newOffset := fi.Size()
+	if firstUnsettledOffset >= 0 {
+		newOffset = firstUnsettledOffset
+	}
+	return events, state.EncodeByteCursor(newOffset), nil
 }
 
 // isCodexSynthetic returns true for harness-injected messages that are not
@@ -146,17 +160,26 @@ func isCodexSynthetic(role, text string) bool {
 	return false
 }
 
-func assembleEvents(lines []rawLine, meta sessionMetaPayload) []model.Event {
+// assembleEvents pairs user input_text → assistant output_text lines, applying:
+//   - Emission gate: only emit pairs whose user prompt line offset >= fromOffset
+//     (skips already-emitted turns from prior scans).
+//   - Settle-gating: a trailing unpaired user prompt is held back (cursor stops
+//     before it) unless fileIdle is true, in which case it is emitted as-is.
+//
+// Returns (events, firstUnsettledOffset) where firstUnsettledOffset is -1 when
+// everything is settled (cursor may advance to fileEnd).
+func assembleEvents(lines []rawLine, lineOffsets []int64, meta sessionMetaPayload, fromOffset int64, fileIdle bool) ([]model.Event, int64) {
 	type pendingPrompt struct {
-		text  string
-		ts    string
-		model string
+		text       string
+		ts         string
+		model      string
+		lineOffset int64 // byte offset of the user prompt line
 	}
 	var out []model.Event
 	var pending *pendingPrompt
 	var curModel string
 
-	for _, l := range lines {
+	for i, l := range lines {
 		// Skip compacted records entirely — their replacement_history would
 		// double-count history already emitted in prior real records.
 		if l.Type == "compacted" {
@@ -185,7 +208,12 @@ func assembleEvents(lines []rawLine, meta sessionMetaPayload) []model.Event {
 		case "user":
 			text := joinFragments(rip.Content, "input_text")
 			if text != "" && !isCodexSynthetic("user", text) {
-				pending = &pendingPrompt{text: text, ts: l.Timestamp, model: curModel}
+				pending = &pendingPrompt{
+					text:       text,
+					ts:         l.Timestamp,
+					model:      curModel,
+					lineOffset: lineOffsets[i],
+				}
 			}
 		case "developer":
 			// Always synthetic — skip without touching pending.
@@ -197,20 +225,48 @@ func assembleEvents(lines []rawLine, meta sessionMetaPayload) []model.Event {
 			if text == "" {
 				continue
 			}
-			out = append(out, model.Event{
-				SourceTool:     "CODEX",
-				Surface:        "cli",
-				SessionID:      meta.ID,
-				PromptText:     pending.text,
-				ResponseText:   text,
-				PromptTs:       parseTS(pending.ts),
-				ProjectContext: meta.Cwd,
-				Model:          pending.model,
-			})
+			// Emit only if the user prompt line is at or beyond fromOffset
+			// (prior turns have already been emitted in a previous scan).
+			if pending.lineOffset >= fromOffset {
+				out = append(out, model.Event{
+					SourceTool:     "CODEX",
+					Surface:        "cli",
+					SessionID:      meta.ID,
+					PromptText:     pending.text,
+					ResponseText:   text,
+					PromptTs:       parseTS(pending.ts),
+					ProjectContext: meta.Cwd,
+					Model:          pending.model,
+				})
+			}
 			pending = nil
 		}
 	}
-	return out
+
+	// Settle-gating: trailing unpaired user prompt.
+	if pending != nil {
+		if fileIdle {
+			// Session is done: emit even without a response (idle flush).
+			if pending.lineOffset >= fromOffset {
+				out = append(out, model.Event{
+					SourceTool:     "CODEX",
+					Surface:        "cli",
+					SessionID:      meta.ID,
+					PromptText:     pending.text,
+					ResponseText:   "",
+					PromptTs:       parseTS(pending.ts),
+					ProjectContext: meta.Cwd,
+					Model:          pending.model,
+				})
+			}
+			return out, -1 // settled by idle; cursor advances to fileEnd
+		}
+		// Assistant still generating: stop cursor before the user prompt line
+		// so it will be re-read on the next scan.
+		return out, pending.lineOffset
+	}
+
+	return out, -1 // everything settled
 }
 
 func joinFragments(frags []contentFragment, fragType string) string {

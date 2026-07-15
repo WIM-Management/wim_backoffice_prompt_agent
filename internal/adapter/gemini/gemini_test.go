@@ -666,6 +666,105 @@ func TestHeaderOnlyJournalIsValid(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Regression test: TestGeminiWinnerPromotion
+//
+// Reproduces the non-winner cursor bug: the original code persisted real
+// mtime/size in the non-winner noopCur. When the higher-priority sibling was
+// later deleted and the file became the winner, the fast-path
+// (statSize == prev.Size && statMtime == prev.MtimeNano) skipped it →
+// its events were never emitted (stranded).
+//
+// Fix: non-winner (and sid=="" corrupt) branches use sentinel mtime/size=0
+// so any future winner-promotion forces a re-parse.
+// ---------------------------------------------------------------------------
+
+func TestGeminiWinnerPromotion(t *testing.T) {
+	home := t.TempDir()
+	chatsDir := filepath.Join(home, ".gemini", "tmp", "proj", "chats")
+
+	// Monolithic file with sessionId "dup" — lower priority (will lose to nested).
+	monoContent := map[string]interface{}{
+		"sessionId": "dup",
+		"messages": []map[string]interface{}{
+			{"id": 1, "timestamp": int64(1720000010000), "type": "user", "content": "from monolithic dup"},
+			{"id": 2, "timestamp": int64(1720000020000), "type": "gemini", "content": "mono response", "model": "gemini-test"},
+		},
+	}
+	monoData, _ := json.Marshal(monoContent)
+	monoPath := filepath.Join(chatsDir, "session-dup.json")
+	writeFile(t, monoPath, string(monoData))
+
+	// Nested file (chats/<uuid>/x.jsonl) with same sessionId "dup" — higher priority (wins).
+	nestedDir := filepath.Join(chatsDir, "dup-uuid")
+	nestedPath := filepath.Join(nestedDir, "x.jsonl")
+	nestedContent := `{"sessionId":"dup","directories":["/tmp/nested"]}` + "\n" +
+		`{"id":1,"timestamp":1720000010000,"type":"user","content":"from nested dup"}` + "\n" +
+		`{"id":2,"timestamp":1720000020000,"type":"gemini","content":"nested response","model":"gemini-test"}` + "\n"
+	writeFile(t, nestedPath, nestedContent)
+
+	// Step 1: parse all paths with a fresh adapter (nil cursor).
+	// Nested wins → its event is emitted. Monolithic is non-winner → 0 events.
+	// Capture the monolithic's returned cursor (it has real content unchanged).
+	a1 := New(home)
+	paths1, err := a1.SessionPaths()
+	if err != nil {
+		t.Fatalf("SessionPaths: %v", err)
+	}
+
+	var monoCursor []byte
+	var totalEvents int
+	for _, p := range paths1 {
+		evs, cur, err := a1.Parse(p, nil, time.Time{})
+		if err != nil {
+			t.Fatalf("Parse(%q): %v", p, err)
+		}
+		totalEvents += len(evs)
+		if p == monoPath {
+			monoCursor = cur
+		}
+	}
+
+	// Exactly 1 event from nested; monolithic is non-winner.
+	if totalEvents != 1 {
+		t.Fatalf("step 1: want 1 event (nested wins), got %d", totalEvents)
+	}
+	if monoCursor == nil {
+		t.Fatal("step 1: monolithic cursor is nil")
+	}
+
+	// Verify that the monolithic cursor has sentinel mtime/size=0 (the fix).
+	var mc geminiCursor
+	if err := json.Unmarshal(monoCursor, &mc); err != nil {
+		t.Fatalf("decode monolithic cursor: %v", err)
+	}
+	if mc.MtimeNano != 0 || mc.Size != 0 {
+		t.Errorf("step 1: non-winner cursor mtime=%d size=%d, want 0/0 (fix not applied — winner-promotion would strand)", mc.MtimeNano, mc.Size)
+	}
+
+	// Step 2: delete the nested file so monolithic becomes the winner.
+	if err := os.Remove(nestedPath); err != nil {
+		t.Fatalf("remove nested: %v", err)
+	}
+
+	// Use a fresh adapter (per scan-lifetime contract) and parse monolithic with
+	// the cursor from step 1. Content is unchanged — only the winner changed.
+	// Before the fix: fast-path (statSize==prev.Size && statMtime==prev.MtimeNano)
+	// would skip it → 0 events → STRANDED.
+	// After the fix: sentinel 0 never matches real stat → re-parse forced → emits.
+	a2 := New(home)
+	evs2, _, err := a2.Parse(monoPath, monoCursor, time.Time{})
+	if err != nil {
+		t.Fatalf("step 2 Parse: %v", err)
+	}
+	if len(evs2) != 1 {
+		t.Fatalf("step 2: want 1 event (monolithic now winner), got %d — winner-promotion strand bug", len(evs2))
+	}
+	if evs2[0].PromptText != "from monolithic dup" {
+		t.Errorf("step 2: PromptText = %q, want %q", evs2[0].PromptText, "from monolithic dup")
+	}
+}
+
 // TestParseMultipleGeminiResponses verifies that multiple consecutive gemini
 // messages are joined and the first model is used.
 func TestParseMultipleGeminiResponses(t *testing.T) {

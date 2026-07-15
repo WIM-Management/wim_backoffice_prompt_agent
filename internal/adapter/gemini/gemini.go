@@ -350,6 +350,8 @@ func (a *Adapter) Parse(file string, cursor []byte, idleCutoff time.Time) ([]mod
 	if sid == "" {
 		// sessionId could not be extracted — attempt to parse to surface corruption
 		// errors. If parsing succeeds (valid but empty/no sessionId), skip silently.
+		// Use sentinel mtime/size=0 so a future successful parse (e.g. after the
+		// file is fixed) is not short-circuited by the fast-path.
 		if statSize == prev.Size && statMtime == prev.MtimeNano {
 			return nil, cursor, nil
 		}
@@ -364,14 +366,17 @@ func (a *Adapter) Parse(file string, cursor []byte, idleCutoff time.Time) ([]mod
 				return nil, cursor, parseErr
 			}
 		}
-		noopCur := geminiCursor{MtimeNano: statMtime, Size: statSize, Emitted: prev.Emitted}
+		// Sentinel 0: a file that later parses successfully must not be stranded
+		// by a primed cursor — force a re-parse on the next scan.
+		noopCur := geminiCursor{MtimeNano: 0, Size: 0, Emitted: prev.Emitted}
 		return nil, encodeCursor(noopCur), nil
 	}
 
 	if !hasSID || winner != file {
-		// Non-winner: no events, but advance the mtime/size cursor so fast-path
-		// works correctly even for skipped files.
-		noopCur := geminiCursor{MtimeNano: statMtime, Size: statSize, Emitted: prev.Emitted}
+		// Non-winner: emit no events. Use sentinel mtime/size=0 so that if this
+		// file later becomes the winner (its higher-priority sibling is deleted),
+		// the fast-path does not skip it — a re-parse is forced on the next scan.
+		noopCur := geminiCursor{MtimeNano: 0, Size: 0, Emitted: prev.Emitted}
 		return nil, encodeCursor(noopCur), nil
 	}
 
