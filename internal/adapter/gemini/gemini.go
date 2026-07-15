@@ -347,7 +347,28 @@ func (a *Adapter) Parse(file string, cursor []byte, idleCutoff time.Time) ([]mod
 
 	prev := decodeCursor(cursor)
 
-	if sid == "" || !hasSID || winner != file {
+	if sid == "" {
+		// sessionId could not be extracted — attempt to parse to surface corruption
+		// errors. If parsing succeeds (valid but empty/no sessionId), skip silently.
+		if statSize == prev.Size && statMtime == prev.MtimeNano {
+			return nil, cursor, nil
+		}
+		if strings.HasSuffix(file, ".json") {
+			_, parseErr := a.parseMonolithic(file, "")
+			if parseErr != nil {
+				return nil, cursor, parseErr
+			}
+		} else {
+			_, parseErr := a.parseJournal(file, "")
+			if parseErr != nil {
+				return nil, cursor, parseErr
+			}
+		}
+		noopCur := geminiCursor{MtimeNano: statMtime, Size: statSize, Emitted: prev.Emitted}
+		return nil, encodeCursor(noopCur), nil
+	}
+
+	if !hasSID || winner != file {
 		// Non-winner: no events, but advance the mtime/size cursor so fast-path
 		// works correctly even for skipped files.
 		noopCur := geminiCursor{MtimeNano: statMtime, Size: statSize, Emitted: prev.Emitted}
@@ -383,7 +404,7 @@ func (a *Adapter) parseMonolithic(file, sid string) ([]model.Event, error) {
 
 	var s monolithicSession
 	if err := json.Unmarshal(data, &s); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("unsupported gemini format (corrupt monolithic json): %s: %w", file, err)
 	}
 
 	msgs := make([]normalizedMsg, len(s.Messages))
@@ -422,11 +443,12 @@ func (a *Adapter) parseJournal(file, sid string) ([]model.Event, error) {
 		lineNum++
 
 		if lineNum == 1 {
-			// Header line — extract directories if present.
+			// Header line — must be valid JSON; if not, the file is corrupt.
 			var h journalHeader
-			if json.Unmarshal(line, &h) == nil {
-				dirs = h.Directories
+			if err := json.Unmarshal(line, &h); err != nil {
+				return nil, fmt.Errorf("unsupported gemini format (corrupt journal): %s", file)
 			}
+			dirs = h.Directories
 			continue
 		}
 
@@ -444,6 +466,10 @@ func (a *Adapter) parseJournal(file, sid string) ([]model.Event, error) {
 			Model:     jl.Model,
 			Timestamp: jl.Timestamp,
 		})
+	}
+
+	if lineNum == 0 {
+		return nil, fmt.Errorf("unsupported gemini format (corrupt journal): %s", file)
 	}
 
 	cwd := a.resolveCwd(file, dirs)

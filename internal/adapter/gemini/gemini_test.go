@@ -571,6 +571,101 @@ func TestCursorFastPathSkip(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Task 9: fail-loud tests — corrupt/unsupported files return explicit errors
+// ---------------------------------------------------------------------------
+
+// TestCorruptMonolithicReturnsError verifies that a corrupt .json file yields
+// a non-nil error and 0 events.
+func TestCorruptMonolithicReturnsError(t *testing.T) {
+	home := t.TempDir()
+	chatsDir := filepath.Join(home, ".gemini", "tmp", "proj", "chats")
+
+	src, err := os.ReadFile("testdata/corrupt.json")
+	if err != nil {
+		t.Fatalf("read testdata/corrupt.json: %v", err)
+	}
+	filePath := filepath.Join(chatsDir, "session-corrupt.json")
+	writeFile(t, filePath, string(src))
+
+	a := New(home)
+	paths, err := a.SessionPaths()
+	if err != nil {
+		t.Fatalf("SessionPaths: %v", err)
+	}
+	if len(paths) == 0 {
+		t.Fatal("no paths found")
+	}
+
+	evs, _, parseErr := a.Parse(paths[0], nil, time.Time{})
+	if parseErr == nil {
+		t.Fatal("corrupt monolithic: want non-nil error, got nil")
+	}
+	if len(evs) != 0 {
+		t.Fatalf("corrupt monolithic: want 0 events, got %d", len(evs))
+	}
+}
+
+// TestCorruptJournalReturnsError verifies that a .jsonl whose header line is
+// not valid JSON returns a non-nil error and 0 events.
+func TestCorruptJournalReturnsError(t *testing.T) {
+	home := t.TempDir()
+	chatsDir := filepath.Join(home, ".gemini", "tmp", "proj", "chats")
+
+	src, err := os.ReadFile("testdata/corrupt_journal.jsonl")
+	if err != nil {
+		t.Fatalf("read testdata/corrupt_journal.jsonl: %v", err)
+	}
+	filePath := filepath.Join(chatsDir, "session-corrupt.jsonl")
+	writeFile(t, filePath, string(src))
+
+	a := New(home)
+	paths, err := a.SessionPaths()
+	if err != nil {
+		t.Fatalf("SessionPaths: %v", err)
+	}
+	if len(paths) == 0 {
+		t.Fatal("no paths found")
+	}
+
+	evs, _, parseErr := a.Parse(paths[0], nil, time.Time{})
+	if parseErr == nil {
+		t.Fatal("corrupt journal: want non-nil error, got nil")
+	}
+	if len(evs) != 0 {
+		t.Fatalf("corrupt journal: want 0 events, got %d", len(evs))
+	}
+}
+
+// TestHeaderOnlyJournalIsValid verifies that a journal with only a header line
+// (no messages) yields 0 events with a nil error — it is a valid empty session.
+func TestHeaderOnlyJournalIsValid(t *testing.T) {
+	home := t.TempDir()
+	chatsDir := filepath.Join(home, ".gemini", "tmp", "proj", "chats")
+
+	// A valid header-only journal: just the header line, no messages.
+	content := `{"sessionId":"empty-session","directories":["/Users/x/proj"]}` + "\n"
+	filePath := filepath.Join(chatsDir, "session-empty.jsonl")
+	writeFile(t, filePath, content)
+
+	a := New(home)
+	paths, err := a.SessionPaths()
+	if err != nil {
+		t.Fatalf("SessionPaths: %v", err)
+	}
+	if len(paths) == 0 {
+		t.Fatal("no paths found")
+	}
+
+	evs, _, parseErr := a.Parse(paths[0], nil, time.Time{})
+	if parseErr != nil {
+		t.Fatalf("header-only journal: want nil error, got %v", parseErr)
+	}
+	if len(evs) != 0 {
+		t.Fatalf("header-only journal: want 0 events, got %d", len(evs))
+	}
+}
+
 // TestParseMultipleGeminiResponses verifies that multiple consecutive gemini
 // messages are joined and the first model is used.
 func TestParseMultipleGeminiResponses(t *testing.T) {

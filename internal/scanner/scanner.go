@@ -1,6 +1,8 @@
 package scanner
 
 import (
+	"fmt"
+	"os"
 	"time"
 
 	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/model"
@@ -27,6 +29,7 @@ func (s *Scanner) ScanOnce() ([]model.Event, func() error) {
 	for _, ad := range s.adapters {
 		paths, err := ad.SessionPaths()
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "SessionPaths 실패 [%s]: %v\n", ad.Name(), err)
 			continue
 		}
 		for _, p := range paths {
@@ -37,6 +40,7 @@ func (s *Scanner) ScanOnce() ([]model.Event, func() error) {
 			}
 			evs, newCursor, err := ad.Parse(p, cursorArg, idleCut)
 			if err != nil {
+				fmt.Fprintf(os.Stderr, "수집 skip [%s %s]: %v\n", ad.Name(), p, err)
 				continue
 			}
 			all = append(all, evs...)

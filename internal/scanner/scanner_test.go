@@ -1,6 +1,7 @@
 package scanner
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,12 +14,26 @@ import (
 
 type fakeAdapter struct{ events int }
 
-func (f fakeAdapter) path() string                 { return "/fake/s.jsonl" }
-func (f fakeAdapter) Name() string                 { return "FAKE" }
+func (f fakeAdapter) path() string                    { return "/fake/s.jsonl" }
+func (f fakeAdapter) Name() string                    { return "FAKE" }
 func (f fakeAdapter) SessionPaths() ([]string, error) { return []string{f.path()}, nil }
 func (f fakeAdapter) Parse(_ string, _ []byte, _ time.Time) ([]model.Event, []byte, error) {
 	evs := make([]model.Event, f.events)
 	return evs, []byte("123"), nil // newCursor>0
+}
+
+// mixedAdapter returns two paths: one succeeds with 1 event, one returns an error.
+type mixedAdapter struct{}
+
+func (m mixedAdapter) Name() string { return "MIXED" }
+func (m mixedAdapter) SessionPaths() ([]string, error) {
+	return []string{"/fake/good.jsonl", "/fake/bad.jsonl"}, nil
+}
+func (m mixedAdapter) Parse(file string, _ []byte, _ time.Time) ([]model.Event, []byte, error) {
+	if file == "/fake/bad.jsonl" {
+		return nil, nil, errors.New("unsupported format (corrupt)")
+	}
+	return []model.Event{{SourceTool: "MIXED", PromptText: "good"}}, []byte("cur"), nil
 }
 
 func stateStore(t *testing.T) *state.Store {
@@ -43,6 +58,20 @@ func TestScanOnceReturnsCommit(t *testing.T) {
 	d1, _ := st.Load()
 	if d1.Files[fakeAdapter{}.path()].Offset == 0 {
 		t.Fatal("offset not advanced after commit")
+	}
+}
+
+// TestPerFileIsolation verifies that a corrupt/erroring file does not abort
+// the scan: the good file's event survives and the error file is skipped.
+func TestPerFileIsolation(t *testing.T) {
+	st := stateStore(t)
+	sc := New([]model.Adapter{mixedAdapter{}}, st, 10*time.Minute)
+	evs, _ := sc.ScanOnce()
+	if len(evs) != 1 {
+		t.Fatalf("want 1 event from good file, got %d", len(evs))
+	}
+	if evs[0].PromptText != "good" {
+		t.Errorf("want PromptText %q, got %q", "good", evs[0].PromptText)
 	}
 }
 

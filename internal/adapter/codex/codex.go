@@ -3,6 +3,7 @@ package codex
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -95,11 +96,16 @@ func (a *Adapter) Parse(file string, cursor []byte, idleCutoff time.Time) ([]mod
 
 	// Parse session_meta from first line to determine if exec session.
 	var meta sessionMetaPayload
+	foundMeta := false
 	for _, l := range lines {
 		if l.Type == "session_meta" {
 			_ = json.Unmarshal(l.Payload, &meta)
+			foundMeta = true
 			break
 		}
+	}
+	if !foundMeta {
+		return nil, cursor, fmt.Errorf("unsupported codex format (no session_meta): %s", file)
 	}
 	if meta.Originator == "codex_exec" || meta.Source == "exec" {
 		return nil, fileEnd, nil

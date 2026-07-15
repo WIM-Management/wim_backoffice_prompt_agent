@@ -6,6 +6,17 @@ import (
 	"time"
 )
 
+func TestCorruptFileReturnsError(t *testing.T) {
+	a := New("")
+	evs, _, err := a.Parse(filepath.Join("testdata", "corrupt.jsonl"), nil, time.Time{})
+	if err == nil {
+		t.Fatal("corrupt.jsonl: want non-nil error, got nil")
+	}
+	if len(evs) != 0 {
+		t.Fatalf("corrupt.jsonl: want 0 events, got %d", len(evs))
+	}
+}
+
 func TestExecSessionSkipped(t *testing.T) {
 	a := New("")
 	evs, _, err := a.Parse(filepath.Join("testdata", "exec.jsonl"), nil, time.Time{})

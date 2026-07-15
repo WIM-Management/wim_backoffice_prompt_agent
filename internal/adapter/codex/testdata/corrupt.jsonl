@@ -1,0 +1,2 @@
+{not valid json
+{"type":"response_item","timestamp":"2024-01-01T00:00:00Z","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}}
