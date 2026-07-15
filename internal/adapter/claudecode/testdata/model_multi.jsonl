@@ -1,0 +1,6 @@
+{"type":"user","isSidechain":false,"sessionId":"s1","cwd":"/repo","gitBranch":"main","timestamp":"2026-06-24T09:00:00Z","message":{"role":"user","content":"첫 번째 질문"}}
+{"type":"assistant","isSidechain":false,"sessionId":"s1","timestamp":"2026-06-24T09:00:05Z","message":{"id":"m1","role":"assistant","content":[{"type":"text","text":"첫 번째 답변."}],"model":"<synthetic>","usage":{"output_tokens":10},"stop_reason":""}}
+{"type":"assistant","isSidechain":false,"sessionId":"s1","timestamp":"2026-06-24T09:00:06Z","message":{"id":"m2","role":"assistant","content":[{"type":"text","text":""}],"model":"claude-opus-4-8","usage":{"output_tokens":5},"stop_reason":"end_turn"}}
+{"type":"user","isSidechain":false,"sessionId":"s1","timestamp":"2026-06-24T09:01:00Z","message":{"role":"user","content":"두 번째 질문"}}
+{"type":"assistant","isSidechain":false,"sessionId":"s1","timestamp":"2026-06-24T09:01:05Z","message":{"id":"m3","role":"assistant","content":[{"type":"text","text":"두 번째 답변."}],"model":"claude-fable-5","usage":{"output_tokens":8},"stop_reason":"end_turn"}}
+{"type":"user","isSidechain":false,"sessionId":"s1","timestamp":"2026-06-24T09:02:00Z","message":{"role":"user","content":"마지막"}}

@@ -65,6 +65,18 @@ func TokenKeyFor(configDir string) string {
 	return DefaultTokenKey + "-" + Slug(configDir)
 }
 
+// PrimaryEntry returns the primary (default ~/.claude) entry from the list —
+// the one whose token attributes machine-wide tool sources (~/.codex, ~/.gemini).
+// Returns ok=false if no default entry is present.
+func PrimaryEntry(entries []Entry) (Entry, bool) {
+	for _, e := range entries {
+		if IsDefault(e.ConfigDir) {
+			return e, true
+		}
+	}
+	return Entry{}, false
+}
+
 // Registry persists enrolled entries to a JSON file.
 type Registry struct{ path string }
 

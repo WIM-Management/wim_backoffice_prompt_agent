@@ -1,0 +1,9 @@
+{"timestamp":"2025-01-01T00:00:00Z","type":"session_meta","payload":{"id":"sess-model-switch","cwd":"/Users/x/proj","originator":"codex-tui","source":"cli"}}
+{"timestamp":"2025-01-01T00:01:00Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Prompt C before any turn_context"}]}}
+{"timestamp":"2025-01-01T00:01:01Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Response to C"}]}}
+{"timestamp":"2025-01-01T00:02:00Z","type":"turn_context","payload":{"model":"gpt-5.5","cwd":"/Users/x/proj"}}
+{"timestamp":"2025-01-01T00:03:00Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Prompt A after gpt-5.5"}]}}
+{"timestamp":"2025-01-01T00:03:01Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Response to A"}]}}
+{"timestamp":"2025-01-01T00:04:00Z","type":"turn_context","payload":{"model":"gpt-5.3-codex-spark","cwd":"/Users/x/proj"}}
+{"timestamp":"2025-01-01T00:05:00Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Prompt B after gpt-5.3-codex-spark"}]}}
+{"timestamp":"2025-01-01T00:05:01Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Response to B"}]}}

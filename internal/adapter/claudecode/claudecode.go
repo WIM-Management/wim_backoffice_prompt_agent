@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/model"
+	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/state"
 )
 
 type Adapter struct{ configDir string }
@@ -48,6 +49,7 @@ type rawLine struct {
 	Message     struct {
 		ID      string          `json:"id"`
 		Role    string          `json:"role"`
+		Model   string          `json:"model"`
 		Content json.RawMessage `json:"content"`
 		Usage   *struct {
 			OutputTokens int `json:"output_tokens"`
@@ -56,23 +58,25 @@ type rawLine struct {
 	} `json:"message"`
 }
 
-// Parse: 줄을 읽어 settled 사람프롬프트→응답 페어만 Event로 반환. fromOffset 이후만.
+// Parse: 줄을 읽어 settled 사람프롬프트→응답 페어만 Event로 반환. cursor 이후만.
 // idleCutoff: 이보다 파일 mtime이 오래면 "파일 idle"로 보고 마지막 턴도 end_turn이면 방출.
-func (a *Adapter) Parse(file string, fromOffset int64, idleCutoff time.Time) ([]model.Event, int64, error) {
+func (a *Adapter) Parse(file string, cursor []byte, idleCutoff time.Time) ([]model.Event, []byte, error) {
+	fromOffset := state.DecodeByteCursor(cursor, 0)
+
 	fi, err := os.Stat(file)
 	if err != nil {
-		return nil, fromOffset, err
+		return nil, cursor, err
 	}
 	if fromOffset > fi.Size() {
 		fromOffset = 0 // 로테이션
 	}
 	f, err := os.Open(file)
 	if err != nil {
-		return nil, fromOffset, err
+		return nil, cursor, err
 	}
 	defer f.Close()
 	if _, err := f.Seek(fromOffset, 0); err != nil {
-		return nil, fromOffset, err
+		return nil, cursor, err
 	}
 
 	fileIdle := fi.ModTime().Before(idleCutoff)
@@ -81,16 +85,16 @@ func (a *Adapter) Parse(file string, fromOffset int64, idleCutoff time.Time) ([]
 	br := bufio.NewReader(f)
 	var lines []rawLine
 	var lineOffsets []int64
-	cur := fromOffset
+	pos := fromOffset
 	for {
 		b, rerr := br.ReadBytes('\n')
 		if len(b) > 0 {
 			var rl rawLine
 			if json.Unmarshal(b, &rl) == nil {
 				lines = append(lines, rl)
-				lineOffsets = append(lineOffsets, cur)
+				lineOffsets = append(lineOffsets, pos)
 			}
-			cur += int64(len(b))
+			pos += int64(len(b))
 		}
 		if rerr != nil {
 			break // io.EOF 포함
@@ -102,7 +106,7 @@ func (a *Adapter) Parse(file string, fromOffset int64, idleCutoff time.Time) ([]
 	if firstUnsettled >= 0 && firstUnsettled < len(lineOffsets) {
 		newOffset = lineOffsets[firstUnsettled] // 미완결 프롬프트 줄 '앞'에서 멈춤
 	}
-	return events, newOffset, nil
+	return events, state.EncodeByteCursor(newOffset), nil
 }
 
 // assemble: lines → settled Event 목록 + firstUnsettled(미완결 첫 사람프롬프트의 lines 인덱스, 없으면 -1).
@@ -140,7 +144,7 @@ func assemble(lines []rawLine, fileIdle bool) ([]model.Event, int) {
 				break
 			}
 		}
-		resp, tokens := assembleResponse(respLines)
+		resp, tokens, respModel := assembleResponse(respLines)
 		l := lines[idx]
 		out = append(out, model.Event{
 			SourceTool:     "CLAUDE_CODE",
@@ -150,6 +154,7 @@ func assemble(lines []rawLine, fileIdle bool) ([]model.Event, int) {
 			ResponseText:   resp,
 			PromptTs:       parseTS(l.Timestamp),
 			TokenCount:     tokens,
+			Model:          respModel,
 			ProjectContext: l.Cwd + branchSuffix(l.GitBranch),
 		})
 	}
@@ -197,12 +202,14 @@ func isSynthetic(text string) bool {
 }
 
 // assembleResponse: distinct message.id 단위로 text 1회·output_tokens 1회.
-func assembleResponse(lines []rawLine) (string, *int) {
+// 세 번째 반환값은 응답 라인 중 <synthetic> 제외 첫 비어있지 않은 model 값.
+func assembleResponse(lines []rawLine) (string, *int, string) {
 	seenText := map[string]bool{}
 	seenTok := map[string]bool{}
 	var sb strings.Builder
 	total := 0
 	hasTok := false
+	respModel := ""
 	for _, l := range lines {
 		if l.Type != "assistant" || l.IsSidechain {
 			continue
@@ -215,6 +222,9 @@ func assembleResponse(lines []rawLine) (string, *int) {
 			total += l.Message.Usage.OutputTokens
 			hasTok = true
 			seenTok[id] = true
+		}
+		if respModel == "" && l.Message.Model != "" && l.Message.Model != "<synthetic>" {
+			respModel = l.Message.Model
 		}
 		var blocks []map[string]any
 		if json.Unmarshal(l.Message.Content, &blocks) == nil {
@@ -233,9 +243,9 @@ func assembleResponse(lines []rawLine) (string, *int) {
 		}
 	}
 	if !hasTok {
-		return sb.String(), nil
+		return sb.String(), nil, respModel
 	}
-	return sb.String(), &total
+	return sb.String(), &total, respModel
 }
 
 func lastAssistantTerminal(lines []rawLine) bool {

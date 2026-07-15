@@ -1,6 +1,8 @@
 package scanner
 
 import (
+	"fmt"
+	"os"
 	"time"
 
 	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/model"
@@ -27,15 +29,25 @@ func (s *Scanner) ScanOnce() ([]model.Event, func() error) {
 	for _, ad := range s.adapters {
 		paths, err := ad.SessionPaths()
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "SessionPaths 실패 [%s]: %v\n", ad.Name(), err)
 			continue
 		}
 		for _, p := range paths {
-			evs, newOff, err := ad.Parse(p, d.Files[p].Offset, idleCut)
+			cur := d.Files[p]
+			cursorArg := cur.Cursor
+			if len(cursorArg) == 0 && cur.Offset > 0 {
+				cursorArg = state.EncodeByteCursor(cur.Offset) // legacy migration: seed from old offset
+			}
+			evs, newCursor, err := ad.Parse(p, cursorArg, idleCut)
 			if err != nil {
+				fmt.Fprintf(os.Stderr, "수집 skip [%s %s]: %v\n", ad.Name(), p, err)
 				continue
 			}
 			all = append(all, evs...)
-			pending[p] = state.FileState{Offset: newOff}
+			fs := cur // preserve Size/Mtime
+			fs.Cursor = newCursor
+			fs.Offset = state.DecodeByteCursor(newCursor, cur.Offset) // dual-write for legacy readers
+			pending[p] = fs
 		}
 	}
 	commit := func() error {
