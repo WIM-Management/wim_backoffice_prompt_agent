@@ -39,6 +39,11 @@ type responseItemPayload struct {
 	Content []contentFragment `json:"content"`
 }
 
+type turnContextPayload struct {
+	Model string `json:"model"`
+	Cwd   string `json:"cwd"`
+}
+
 type contentFragment struct {
 	Type string `json:"type"`
 	Text string `json:"text"`
@@ -137,16 +142,26 @@ func isCodexSynthetic(role, text string) bool {
 
 func assembleEvents(lines []rawLine, meta sessionMetaPayload) []model.Event {
 	type pendingPrompt struct {
-		text string
-		ts   string
+		text  string
+		ts    string
+		model string
 	}
 	var out []model.Event
 	var pending *pendingPrompt
+	var curModel string
 
 	for _, l := range lines {
 		// Skip compacted records entirely — their replacement_history would
 		// double-count history already emitted in prior real records.
 		if l.Type == "compacted" {
+			continue
+		}
+		// Track the most recent model seen before any prompt.
+		if l.Type == "turn_context" {
+			var tcp turnContextPayload
+			if json.Unmarshal(l.Payload, &tcp) == nil && tcp.Model != "" {
+				curModel = tcp.Model
+			}
 			continue
 		}
 		if l.Type != "response_item" {
@@ -164,7 +179,7 @@ func assembleEvents(lines []rawLine, meta sessionMetaPayload) []model.Event {
 		case "user":
 			text := joinFragments(rip.Content, "input_text")
 			if text != "" && !isCodexSynthetic("user", text) {
-				pending = &pendingPrompt{text: text, ts: l.Timestamp}
+				pending = &pendingPrompt{text: text, ts: l.Timestamp, model: curModel}
 			}
 		case "developer":
 			// Always synthetic — skip without touching pending.
@@ -184,6 +199,7 @@ func assembleEvents(lines []rawLine, meta sessionMetaPayload) []model.Event {
 				ResponseText:   text,
 				PromptTs:       parseTS(pending.ts),
 				ProjectContext: meta.Cwd,
+				Model:          pending.model,
 			})
 			pending = nil
 		}

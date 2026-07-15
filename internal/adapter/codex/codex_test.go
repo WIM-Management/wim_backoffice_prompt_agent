@@ -45,6 +45,42 @@ func TestFilterCompacted(t *testing.T) {
 	}
 }
 
+func TestModelSwitch(t *testing.T) {
+	a := New("")
+	evs, _, err := a.Parse(filepath.Join("testdata", "model_switch.jsonl"), nil, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(evs) != 3 {
+		t.Fatalf("model_switch: want 3 events, got %d", len(evs))
+	}
+
+	// Build a map from prompt text → event for order-independent assertions.
+	byPrompt := make(map[string]string, len(evs))
+	for _, e := range evs {
+		byPrompt[e.PromptText] = e.Model
+	}
+
+	cases := []struct {
+		prompt string
+		model  string
+	}{
+		{"Prompt C before any turn_context", ""},
+		{"Prompt A after gpt-5.5", "gpt-5.5"},
+		{"Prompt B after gpt-5.3-codex-spark", "gpt-5.3-codex-spark"},
+	}
+	for _, tc := range cases {
+		got, ok := byPrompt[tc.prompt]
+		if !ok {
+			t.Errorf("no event with PromptText %q", tc.prompt)
+			continue
+		}
+		if got != tc.model {
+			t.Errorf("prompt %q: want Model=%q, got %q", tc.prompt, tc.model, got)
+		}
+	}
+}
+
 func TestInteractiveSession(t *testing.T) {
 	a := New("")
 	evs, _, err := a.Parse(filepath.Join("testdata", "interactive.jsonl"), nil, time.Time{})
