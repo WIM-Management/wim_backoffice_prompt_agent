@@ -1,0 +1,4 @@
+{"sessionId":"journal-session","projectHash":"def456","startTime":1720000100000,"lastUpdated":1720000200000,"kind":"journal"}
+{"id":1,"timestamp":1720000110000,"type":"user","content":"hello from journal"}
+{"$set":{"lastUpdated":1720000150000}}
+{"id":2,"timestamp":1720000160000,"type":"gemini","content":[{"text":"hello back"}],"model":"gemini-3-flash-preview"}
