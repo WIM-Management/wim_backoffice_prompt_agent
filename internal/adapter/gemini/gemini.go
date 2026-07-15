@@ -39,9 +39,16 @@ func (a *Adapter) Name() string { return "GEMINI" }
 
 // emittedSetCap is the maximum number of identities retained in the emitted set.
 // When exceeded, the oldest entries (insertion order) are dropped. Dropping the
-// oldest may cause a re-emission on the next scan, but the server dedup
-// (content_hash unique key) absorbs the duplicate safely — it is mildly wasteful
-// but not incorrect.
+// oldest may cause a re-emission on the next scan, but the server dedup absorbs
+// the duplicate safely — mildly wasteful, not incorrect.
+//
+// Server dedup contract this relies on: prompt_events has a UNIQUE constraint
+// ux_prompt_events_dedup (employee_id, source_tool, content_hash) where
+// content_hash = sha256("{sourceTool}|{sessionId}|{promptText}|{promptTs}")
+// at second resolution (model deliberately excluded). Our emitted identity
+// (see promptIdentity) uses the SAME four fields, so a re-sent event maps to an
+// existing row and the server returns DUPLICATE — no double storage. If that
+// constraint is ever removed, drop-oldest re-emission WOULD duplicate rows.
 const emittedSetCap = 2000
 
 // perScanEmitCap is the maximum number of new events emitted in a single Parse
