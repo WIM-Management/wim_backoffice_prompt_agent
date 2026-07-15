@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/adapter/claudecode"
+	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/adapter/codex"
+	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/adapter/gemini"
 	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/config"
 	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/daemon"
 	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/enroll"
@@ -104,17 +106,34 @@ func runOnce(cfg config.Config) error {
 			failed = append(failed, e.ConfigDir)
 		}
 	}
+
+	// 머신 패스: codex/gemini는 primary(~/.claude) 토큰으로 1회만 수집.
+	home, _ := os.UserHomeDir()
+	if primary, ok := registry.PrimaryEntry(entries); ok {
+		if tok, err := enroll.NewKeychainStore(primary.TokenKey).Get(); err == nil && tok != "" {
+			machineAdapters := []model.Adapter{codex.New(home), gemini.New(home)}
+			if err := collectWith(cfg, store, primary, machineAdapters); err != nil {
+				fmt.Fprintf(os.Stderr, "머신 수집 실패 [codex/gemini]: %v\n", err)
+				failed = append(failed, "codex/gemini")
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "머신 수집 skip: primary 토큰 없음 (codex/gemini 미수집)\n")
+		}
+	} else {
+		fmt.Fprintf(os.Stderr, "머신 수집 skip: primary 엔트리 없음\n")
+	}
+
 	if len(failed) > 0 {
 		return fmt.Errorf("%d개 폴더 수집 실패: %s", len(failed), strings.Join(failed, ", "))
 	}
 	return nil
 }
 
-// collectDir runs one scan→redact→enqueue→commit→drain cycle for a single
-// registered config dir, uploading with THAT dir's token. Disk persistence
-// (Enqueue) precedes offset advance (commit) to guarantee zero loss on crash (§4.5).
-func collectDir(cfg config.Config, store *state.Store, e registry.Entry) error {
-	sc := scanner.New([]model.Adapter{claudecode.New(e.ConfigDir)}, store, cfg.IdleCutoff)
+// collectWith runs one scan→redact→enqueue→commit→drain cycle using the given
+// adapters and entry (token + queue dir). Disk persistence (Enqueue) precedes
+// offset advance (commit) to guarantee zero loss on crash (§4.5).
+func collectWith(cfg config.Config, store *state.Store, e registry.Entry, adapters []model.Adapter) error {
+	sc := scanner.New(adapters, store, cfg.IdleCutoff)
 	q := queue.New(queueDirFor(cfg, e))
 
 	evs, commit := sc.ScanOnce()
@@ -131,9 +150,15 @@ func collectDir(cfg config.Config, store *state.Store, e registry.Entry) error {
 	if err := commit(); err != nil {
 		return fmt.Errorf("commit offset: %w", err)
 	}
-	// 3) Upload queued events with this dir's token; failures leave files for next run.
+	// 3) Upload queued events with this entry's token; failures leave files for next run.
 	up := uploader.New(cfg.BaseURL, enroll.NewKeychainStore(e.TokenKey).Get, 100)
 	return q.Drain(func(b []model.Event) error { return up.Send(b) })
+}
+
+// collectDir runs one scan→redact→enqueue→commit→drain cycle for a single
+// registered config dir, uploading with THAT dir's token.
+func collectDir(cfg config.Config, store *state.Store, e registry.Entry) error {
+	return collectWith(cfg, store, e, []model.Adapter{claudecode.New(e.ConfigDir)})
 }
 
 func registryPath(cfg config.Config) string { return filepath.Join(cfg.Dir, "registry.json") }

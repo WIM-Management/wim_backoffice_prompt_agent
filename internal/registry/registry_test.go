@@ -116,6 +116,39 @@ func TestRemove(t *testing.T) {
 	}
 }
 
+func TestPrimaryEntry(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	defaultDir := DefaultConfigDir()
+	melleDir := filepath.Join(home, ".claude-melle")
+	xDir := filepath.Join(home, ".claude-x")
+
+	// Has default entry → returns it, ok=true.
+	entries := []Entry{
+		{ConfigDir: defaultDir, TokenKey: DefaultTokenKey},
+		{ConfigDir: melleDir, TokenKey: "device-token-claude-melle"},
+		{ConfigDir: xDir, TokenKey: "device-token-claude-x"},
+	}
+	got, ok := PrimaryEntry(entries)
+	if !ok {
+		t.Fatal("PrimaryEntry returned ok=false, want true")
+	}
+	if got.ConfigDir != defaultDir || got.TokenKey != DefaultTokenKey {
+		t.Errorf("PrimaryEntry = %+v, want {%s %s}", got, defaultDir, DefaultTokenKey)
+	}
+
+	// No default entry → ok=false.
+	nonDefault := []Entry{
+		{ConfigDir: melleDir, TokenKey: "device-token-claude-melle"},
+		{ConfigDir: xDir, TokenKey: "device-token-claude-x"},
+	}
+	if _, ok := PrimaryEntry(nonDefault); ok {
+		t.Fatal("PrimaryEntry returned ok=true for non-default-only list, want false")
+	}
+}
+
 // sanity: registry.json은 0600으로 저장
 func TestSavePerms(t *testing.T) {
 	home := t.TempDir()
