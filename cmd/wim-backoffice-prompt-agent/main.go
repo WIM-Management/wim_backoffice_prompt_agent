@@ -108,8 +108,11 @@ func runOnce(cfg config.Config) error {
 	}
 
 	// 머신 패스: codex/gemini는 primary(~/.claude) 토큰으로 1회만 수집.
-	home, _ := os.UserHomeDir()
-	if primary, ok := registry.PrimaryEntry(entries); ok {
+	home, homeErr := os.UserHomeDir()
+	if homeErr != nil {
+		// home을 못 구하면 codex/gemini 글롭이 빈 경로가 돼 엉뚱한 스캔이 되므로 머신 패스를 건너뛴다.
+		fmt.Fprintf(os.Stderr, "머신 수집 skip: home 디렉터리 결정 실패: %v\n", homeErr)
+	} else if primary, ok := registry.PrimaryEntry(entries); ok {
 		if tok, err := enroll.NewKeychainStore(primary.TokenKey).Get(); err == nil && tok != "" {
 			machineAdapters := []model.Adapter{codex.New(home), gemini.New(home)}
 			if err := collectWith(cfg, store, primary, machineAdapters); err != nil {
