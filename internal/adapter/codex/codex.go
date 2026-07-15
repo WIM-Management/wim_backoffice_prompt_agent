@@ -1,0 +1,165 @@
+package codex
+
+import (
+	"bufio"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/model"
+	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/state"
+)
+
+type Adapter struct{ home string }
+
+func New(home string) *Adapter { return &Adapter{home} }
+func (a *Adapter) Name() string { return "CODEX" }
+func (a *Adapter) SessionPaths() ([]string, error) {
+	return filepath.Glob(filepath.Join(a.home, ".codex", "sessions", "*", "*", "*", "rollout-*.jsonl"))
+}
+
+type rawLine struct {
+	Timestamp string          `json:"timestamp"`
+	Type      string          `json:"type"`
+	Payload   json.RawMessage `json:"payload"`
+}
+
+type sessionMetaPayload struct {
+	ID         string `json:"id"`
+	Cwd        string `json:"cwd"`
+	Originator string `json:"originator"`
+	Source     string `json:"source"`
+}
+
+type responseItemPayload struct {
+	Type    string            `json:"type"`
+	Role    string            `json:"role"`
+	Content []contentFragment `json:"content"`
+}
+
+type contentFragment struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+func parseTS(s string) model.NaiveTS {
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		t = time.Time{}
+	}
+	return model.NaiveTS(t.UTC())
+}
+
+func (a *Adapter) Parse(file string, cursor []byte, idleCutoff time.Time) ([]model.Event, []byte, error) {
+	fromOffset := state.DecodeByteCursor(cursor, 0)
+
+	fi, err := os.Stat(file)
+	if err != nil {
+		return nil, cursor, err
+	}
+	if fromOffset > fi.Size() {
+		fromOffset = 0
+	}
+	f, err := os.Open(file)
+	if err != nil {
+		return nil, cursor, err
+	}
+	defer f.Close()
+	if _, err := f.Seek(fromOffset, 0); err != nil {
+		return nil, cursor, err
+	}
+
+	br := bufio.NewReader(f)
+	var lines []rawLine
+	for {
+		b, rerr := br.ReadBytes('\n')
+		if len(b) > 0 {
+			var rl rawLine
+			if json.Unmarshal(b, &rl) == nil {
+				lines = append(lines, rl)
+			}
+		}
+		if rerr != nil {
+			break
+		}
+	}
+
+	fileEnd := state.EncodeByteCursor(fi.Size())
+
+	// Parse session_meta from first line to determine if exec session.
+	var meta sessionMetaPayload
+	for _, l := range lines {
+		if l.Type == "session_meta" {
+			_ = json.Unmarshal(l.Payload, &meta)
+			break
+		}
+	}
+	if meta.Originator == "codex_exec" || meta.Source == "exec" {
+		return nil, fileEnd, nil
+	}
+
+	// Interactive session: pair user input_text → assistant output_text.
+	events := assembleEvents(lines, meta)
+	return events, fileEnd, nil
+}
+
+func assembleEvents(lines []rawLine, meta sessionMetaPayload) []model.Event {
+	type pendingPrompt struct {
+		text string
+		ts   string
+	}
+	var out []model.Event
+	var pending *pendingPrompt
+
+	for _, l := range lines {
+		if l.Type != "response_item" {
+			continue
+		}
+		var rip responseItemPayload
+		if json.Unmarshal(l.Payload, &rip) != nil {
+			continue
+		}
+		if rip.Type != "message" {
+			continue
+		}
+
+		switch rip.Role {
+		case "user":
+			text := joinFragments(rip.Content, "input_text")
+			if text != "" {
+				pending = &pendingPrompt{text: text, ts: l.Timestamp}
+			}
+		case "assistant":
+			if pending == nil {
+				continue
+			}
+			text := joinFragments(rip.Content, "output_text")
+			if text == "" {
+				continue
+			}
+			out = append(out, model.Event{
+				SourceTool:     "CODEX",
+				Surface:        "cli",
+				SessionID:      meta.ID,
+				PromptText:     pending.text,
+				ResponseText:   text,
+				PromptTs:       parseTS(pending.ts),
+				ProjectContext: meta.Cwd,
+			})
+			pending = nil
+		}
+	}
+	return out
+}
+
+func joinFragments(frags []contentFragment, fragType string) string {
+	var sb strings.Builder
+	for _, f := range frags {
+		if f.Type == fragType {
+			sb.WriteString(f.Text)
+		}
+	}
+	return sb.String()
+}
