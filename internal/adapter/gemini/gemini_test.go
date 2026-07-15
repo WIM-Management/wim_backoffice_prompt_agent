@@ -431,6 +431,146 @@ func TestParseCwdFromProjectsJSON(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Task 8: Cursor tests — emitted-identity cursor + mtime/size fast-path
+// ---------------------------------------------------------------------------
+
+// makeMonolithicSession builds a monolithic JSON session with the given prompts.
+// Each prompt is paired with a gemini response "response to <prompt>".
+// Timestamps are spaced 10s apart starting at base (milliseconds).
+func makeMonolithicSession(sessionID string, prompts []string, baseMs int64) map[string]interface{} {
+	msgs := []map[string]interface{}{}
+	ts := baseMs
+	for _, p := range prompts {
+		msgs = append(msgs, map[string]interface{}{
+			"id": len(msgs) + 1, "timestamp": ts, "type": "user", "content": p,
+		})
+		ts += 10000
+		msgs = append(msgs, map[string]interface{}{
+			"id": len(msgs) + 1, "timestamp": ts, "type": "gemini",
+			"content": "response to " + p, "model": "gemini-test",
+		})
+		ts += 10000
+	}
+	return map[string]interface{}{
+		"sessionId": sessionID,
+		"messages":  msgs,
+	}
+}
+
+// writeMonolithicSession serialises and writes a monolithic session JSON file.
+func writeMonolithicSession(t *testing.T, path string, session map[string]interface{}) {
+	t.Helper()
+	data, err := json.Marshal(session)
+	if err != nil {
+		t.Fatalf("marshal session: %v", err)
+	}
+	writeFile(t, path, string(data))
+}
+
+// TestCursorEmitsOnlyNew verifies that:
+//  1. First Parse (nil cursor) emits all settled prompts.
+//  2. After appending a new prompt (size increases, mtime may be same second),
+//     second Parse emits only the new prompt.
+func TestCursorEmitsOnlyNew(t *testing.T) {
+	home := t.TempDir()
+	chatsDir := filepath.Join(home, ".gemini", "tmp", "proj", "chats")
+	filePath := filepath.Join(chatsDir, "session-cursor-test.json")
+
+	// Write 2 prompts.
+	sess := makeMonolithicSession("cursor-session", []string{"prompt one", "prompt two"}, 1720000000000)
+	writeMonolithicSession(t, filePath, sess)
+
+	a := New(home)
+
+	// First parse: nil cursor → should emit both prompts.
+	evs1, cur1, err := a.Parse(filePath, nil, time.Time{})
+	if err != nil {
+		t.Fatalf("Parse #1: %v", err)
+	}
+	if len(evs1) != 2 {
+		t.Fatalf("Parse #1: expected 2 events, got %d", len(evs1))
+	}
+	if evs1[0].PromptText != "prompt one" {
+		t.Errorf("Parse #1 ev[0].PromptText = %q, want %q", evs1[0].PromptText, "prompt one")
+	}
+	if evs1[1].PromptText != "prompt two" {
+		t.Errorf("Parse #1 ev[1].PromptText = %q, want %q", evs1[1].PromptText, "prompt two")
+	}
+
+	// Verify cursor has 2 emitted identities.
+	var c1 geminiCursor
+	if err := json.Unmarshal(cur1, &c1); err != nil {
+		t.Fatalf("decode cursor #1: %v", err)
+	}
+	if len(c1.Emitted) != 2 {
+		t.Errorf("cursor #1 emitted len = %d, want 2", len(c1.Emitted))
+	}
+
+	// Append a 3rd prompt to the file (size grows; mtime may stay same second).
+	sess2 := makeMonolithicSession("cursor-session",
+		[]string{"prompt one", "prompt two", "prompt three"}, 1720000000000)
+	writeMonolithicSession(t, filePath, sess2)
+
+	// Second parse: cursor from first call → should emit only prompt three.
+	// A fresh Adapter is needed because winnerMap is per-instance.
+	a2 := New(home)
+	evs2, cur2, err := a2.Parse(filePath, cur1, time.Time{})
+	if err != nil {
+		t.Fatalf("Parse #2: %v", err)
+	}
+	if len(evs2) != 1 {
+		t.Fatalf("Parse #2: expected 1 event (only new prompt), got %d: %+v", len(evs2), evs2)
+	}
+	if evs2[0].PromptText != "prompt three" {
+		t.Errorf("Parse #2 ev[0].PromptText = %q, want %q", evs2[0].PromptText, "prompt three")
+	}
+
+	// Cursor should now have 3 emitted identities.
+	var c2 geminiCursor
+	if err := json.Unmarshal(cur2, &c2); err != nil {
+		t.Fatalf("decode cursor #2: %v", err)
+	}
+	if len(c2.Emitted) != 3 {
+		t.Errorf("cursor #2 emitted len = %d, want 3", len(c2.Emitted))
+	}
+}
+
+// TestCursorFastPathSkip verifies that a second Parse with an unchanged file
+// (same size and mtime) returns zero events and the same cursor.
+func TestCursorFastPathSkip(t *testing.T) {
+	home := t.TempDir()
+	chatsDir := filepath.Join(home, ".gemini", "tmp", "proj", "chats")
+	filePath := filepath.Join(chatsDir, "session-fastpath-test.json")
+
+	sess := makeMonolithicSession("fastpath-session", []string{"only prompt"}, 1720000000000)
+	writeMonolithicSession(t, filePath, sess)
+
+	a := New(home)
+	evs1, cur1, err := a.Parse(filePath, nil, time.Time{})
+	if err != nil {
+		t.Fatalf("Parse #1: %v", err)
+	}
+	if len(evs1) != 1 {
+		t.Fatalf("Parse #1: expected 1 event, got %d", len(evs1))
+	}
+
+	// Second parse with same file (no writes) — fast-path must skip.
+	a2 := New(home)
+	evs2, cur2, err := a2.Parse(filePath, cur1, time.Time{})
+	if err != nil {
+		t.Fatalf("Parse #2: %v", err)
+	}
+	if len(evs2) != 0 {
+		t.Errorf("Parse #2 (fast-path): expected 0 events, got %d: %+v", len(evs2), evs2)
+	}
+
+	// Cursor should be unchanged (same bytes).
+	if string(cur2) != string(cur1) {
+		t.Errorf("Parse #2 (fast-path): cursor changed:\n  before: %s\n  after:  %s", cur1, cur2)
+	}
+}
+
 // TestParseMultipleGeminiResponses verifies that multiple consecutive gemini
 // messages are joined and the first model is used.
 func TestParseMultipleGeminiResponses(t *testing.T) {

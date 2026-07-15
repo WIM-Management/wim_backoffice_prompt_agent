@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -12,7 +13,6 @@ import (
 	"time"
 
 	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/model"
-	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/state"
 )
 
 // Adapter implements model.Adapter for Google Gemini CLI (~/.gemini).
@@ -36,6 +36,128 @@ type Adapter struct {
 
 func New(home string) *Adapter { return &Adapter{home: home} }
 func (a *Adapter) Name() string { return "GEMINI" }
+
+// emittedSetCap is the maximum number of identities retained in the emitted set.
+// When exceeded, the oldest entries (insertion order) are dropped. Dropping the
+// oldest may cause a re-emission on the next scan, but the server dedup
+// (content_hash unique key) absorbs the duplicate safely — it is mildly wasteful
+// but not incorrect.
+const emittedSetCap = 2000
+
+// perScanEmitCap is the maximum number of new events emitted in a single Parse
+// call. If more new events exist than this cap, the first perScanEmitCap are
+// emitted and the remainder are held for the next scan. When truncating, the
+// returned cursor's mtime/size are reset to zero (sentinel) so the fast-path
+// does not skip the file next scan and the remaining events can be emitted.
+const perScanEmitCap = 500
+
+// geminiCursor is the JSON cursor persisted between scans for each file.
+// Emitted is an ordered slice of 4-tuple identity strings used as a set.
+// Ordering is insertion order (oldest first) so the cap drops the oldest entries.
+type geminiCursor struct {
+	MtimeNano int64    `json:"mtimeNano"`
+	Size      int64    `json:"size"`
+	Emitted   []string `json:"emitted"`
+}
+
+// promptIdentity returns the canonical 4-tuple string for an event:
+// "GEMINI|<sessionId>|<promptText>|<promptTs>" where promptTs uses the same
+// second-resolution format as NaiveTS.MarshalJSON.
+func promptIdentity(ev model.Event) string {
+	ts := time.Time(ev.PromptTs).UTC().Format("2006-01-02T15:04:05")
+	return ev.SourceTool + "|" + ev.SessionID + "|" + ev.PromptText + "|" + ts
+}
+
+// decodeCursor deserialises a cursor. Nil/empty input returns a zero-value cursor.
+func decodeCursor(raw []byte) geminiCursor {
+	if len(raw) == 0 {
+		return geminiCursor{}
+	}
+	var c geminiCursor
+	if err := json.Unmarshal(raw, &c); err != nil {
+		return geminiCursor{}
+	}
+	return c
+}
+
+// encodeCursor serialises a cursor. Errors are silently swallowed; callers
+// receive nil which is treated as an empty cursor on the next decode.
+func encodeCursor(c geminiCursor) []byte {
+	b, _ := json.Marshal(c)
+	return b
+}
+
+// gateEmissions filters events to only those whose identity is not already in
+// the emitted set of cur, adds new identities, applies the emittedSetCap, and
+// applies the perScanEmitCap. It returns the filtered events and an updated
+// cursor ready to persist.
+//
+// mtime/size in the returned cursor are always set to the values provided in
+// statMtime/statSize, EXCEPT when perScanEmitCap truncation occurs: in that
+// case they are reset to zero so the next scan re-parses (the fast-path checks
+// size && mtime; sentinel 0 guarantees a mismatch against any real stat).
+func gateEmissions(events []model.Event, cur geminiCursor, statMtime, statSize int64) ([]model.Event, geminiCursor) {
+	// Build a fast-lookup presence map from the ordered slice.
+	present := make(map[string]struct{}, len(cur.Emitted))
+	for _, id := range cur.Emitted {
+		present[id] = struct{}{}
+	}
+
+	emitted := make([]string, len(cur.Emitted))
+	copy(emitted, cur.Emitted)
+
+	var out []model.Event
+	for _, ev := range events {
+		id := promptIdentity(ev)
+		if _, seen := present[id]; seen {
+			continue
+		}
+		out = append(out, ev)
+	}
+
+	truncated := len(out) > perScanEmitCap
+	if truncated {
+		fmt.Fprintf(os.Stderr,
+			"gemini: perScanEmitCap (%d) exceeded for session %q — emitting first %d, %d deferred to next scan\n",
+			perScanEmitCap, func() string {
+				if len(out) > 0 {
+					return out[0].SessionID
+				}
+				return "(unknown)"
+			}(), perScanEmitCap, len(out)-perScanEmitCap)
+		out = out[:perScanEmitCap]
+	}
+
+	// Add only the emitted identities to the set.
+	for _, ev := range out {
+		id := promptIdentity(ev)
+		if _, seen := present[id]; !seen {
+			emitted = append(emitted, id)
+			present[id] = struct{}{}
+		}
+	}
+
+	// Apply emittedSetCap: drop oldest entries when over cap.
+	if len(emitted) > emittedSetCap {
+		drop := len(emitted) - emittedSetCap
+		emitted = emitted[drop:]
+	}
+
+	newCur := geminiCursor{
+		MtimeNano: statMtime,
+		Size:      statSize,
+		Emitted:   emitted,
+	}
+
+	// When we truncated, reset mtime/size to zero so the fast-path does not
+	// skip the file next scan (sentinel 0 never matches a real stat value).
+	if truncated {
+		newCur.MtimeNano = 0
+		newCur.Size = 0
+	}
+
+	return out, newCur
+}
 
 // SessionPaths returns the union of all Gemini session file globs.
 // Formats supported:
@@ -133,12 +255,6 @@ type normalizedMsg struct {
 	Timestamp int64
 }
 
-// offsetMsg wraps normalizedMsg with the byte offset of the line in a journal file.
-type offsetMsg struct {
-	normalizedMsg
-	lineOffset int64
-}
-
 // sessionIDFromFile reads just enough of a file to extract its sessionId.
 func sessionIDFromFile(path string) string {
 	f, err := os.Open(path)
@@ -208,6 +324,11 @@ func (a *Adapter) ensureWinnerMap() {
 
 // Parse implements model.Adapter. For non-winner files (cross-format dedup),
 // returns zero events but a valid cursor.
+//
+// Cursor strategy: emitted-identity cursor with mtime/size fast-path.
+//   - If size and mtime are unchanged since the last scan, skip parsing entirely.
+//   - Otherwise parse the full file, filter to events whose identity is not
+//     already in the emitted set, add new identities, and re-encode the cursor.
 func (a *Adapter) Parse(file string, cursor []byte, idleCutoff time.Time) ([]model.Event, []byte, error) {
 	a.ensureWinnerMap()
 
@@ -221,27 +342,48 @@ func (a *Adapter) Parse(file string, cursor []byte, idleCutoff time.Time) ([]mod
 	if err != nil {
 		return nil, cursor, err
 	}
-	newCursor := state.EncodeByteCursor(fi.Size())
+	statSize := fi.Size()
+	statMtime := fi.ModTime().UnixNano()
+
+	prev := decodeCursor(cursor)
 
 	if sid == "" || !hasSID || winner != file {
-		return nil, newCursor, nil
+		// Non-winner: no events, but advance the mtime/size cursor so fast-path
+		// works correctly even for skipped files.
+		noopCur := geminiCursor{MtimeNano: statMtime, Size: statSize, Emitted: prev.Emitted}
+		return nil, encodeCursor(noopCur), nil
 	}
 
-	if strings.HasSuffix(file, ".json") {
-		return a.parseMonolithic(file, sid, newCursor)
+	// mtime/size fast-path: if the file has not changed, skip re-parsing.
+	if statSize == prev.Size && statMtime == prev.MtimeNano {
+		return nil, cursor, nil
 	}
-	return a.parseJournal(file, sid, cursor, newCursor)
+
+	// File changed (or first scan): parse and gate emissions.
+	var events []model.Event
+	if strings.HasSuffix(file, ".json") {
+		events, err = a.parseMonolithic(file, sid)
+	} else {
+		events, err = a.parseJournal(file, sid)
+	}
+	if err != nil {
+		return nil, cursor, err
+	}
+
+	out, newCur := gateEmissions(events, prev, statMtime, statSize)
+	return out, encodeCursor(newCur), nil
 }
 
-func (a *Adapter) parseMonolithic(file, sid string, newCursor []byte) ([]model.Event, []byte, error) {
+// parseMonolithic parses a monolithic .json file and returns all settled prompt events.
+func (a *Adapter) parseMonolithic(file, sid string) ([]model.Event, error) {
 	data, err := os.ReadFile(file)
 	if err != nil {
-		return nil, newCursor, err
+		return nil, err
 	}
 
 	var s monolithicSession
 	if err := json.Unmarshal(data, &s); err != nil {
-		return nil, newCursor, err
+		return nil, err
 	}
 
 	msgs := make([]normalizedMsg, len(s.Messages))
@@ -255,51 +397,39 @@ func (a *Adapter) parseMonolithic(file, sid string, newCursor []byte) ([]model.E
 	}
 
 	cwd := a.resolveCwd(file, s.Directories)
-	events := pairMessages(msgs, sid, cwd)
-	return events, newCursor, nil
+	return pairMessages(msgs, sid, cwd), nil
 }
 
-// parseJournal parses a JSONL journal file with byte-cursor support.
-// All messages (user + gemini) are collected with their byte offsets so that
-// pairing is correct even when only a tail of the file is new.
-func (a *Adapter) parseJournal(file, sid string, cursor, newCursor []byte) ([]model.Event, []byte, error) {
-	fromOffset := state.DecodeByteCursor(cursor, 0)
-
+// parseJournal parses a JSONL journal file and returns all settled prompt events.
+// The full file is always re-parsed; identity-based dedup in gateEmissions handles
+// incremental emission (so the old byte-offset cursor is no longer needed here).
+func (a *Adapter) parseJournal(file, sid string) ([]model.Event, error) {
 	f, err := os.Open(file)
 	if err != nil {
-		return nil, newCursor, err
+		return nil, err
 	}
 	defer f.Close()
 
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 1<<20), 1<<20)
 
-	var offset int64
 	lineNum := 0
 	var dirs []string
-	var msgs []offsetMsg
+	var msgs []normalizedMsg
 
 	for sc.Scan() {
 		line := sc.Bytes()
-		lineLen := int64(len(line)) + 1 // +1 for newline
-
 		lineNum++
+
 		if lineNum == 1 {
 			// Header line — extract directories if present.
 			var h journalHeader
 			if json.Unmarshal(line, &h) == nil {
 				dirs = h.Directories
 			}
-			offset += lineLen
 			continue
 		}
 
-		lineStart := offset
-		offset += lineLen
-
-		// $set journal-update lines carry no type:"user"/"gemini", so the type
-		// filter below skips them structurally. We do NOT byte-match "$set" to
-		// avoid false-positives on user prompts that quote the literal "$set".
 		var jl journalLine
 		if json.Unmarshal(line, &jl) != nil {
 			continue
@@ -308,55 +438,20 @@ func (a *Adapter) parseJournal(file, sid string, cursor, newCursor []byte) ([]mo
 			continue
 		}
 
-		msgs = append(msgs, offsetMsg{
-			normalizedMsg: normalizedMsg{
-				Type:      jl.Type,
-				Content:   jl.Content,
-				Model:     jl.Model,
-				Timestamp: jl.Timestamp,
-			},
-			lineOffset: lineStart,
+		msgs = append(msgs, normalizedMsg{
+			Type:      jl.Type,
+			Content:   jl.Content,
+			Model:     jl.Model,
+			Timestamp: jl.Timestamp,
 		})
 	}
 
 	cwd := a.resolveCwd(file, dirs)
-
-	var events []model.Event
-	for i := 0; i < len(msgs); i++ {
-		om := msgs[i]
-		if om.Type != "user" {
-			continue
-		}
-
-		text := extractContent(om.Content)
-		if shouldSkipUserText(text) {
-			continue
-		}
-
-		// Cursor: only emit events whose user-message line is new.
-		if om.lineOffset < fromOffset {
-			continue
-		}
-
-		responseText, responseModel := collectGeminiResponsesOffset(msgs[i+1:])
-
-		events = append(events, model.Event{
-			SourceTool:     "GEMINI",
-			Surface:        "cli",
-			SessionID:      sid,
-			PromptText:     text,
-			ResponseText:   responseText,
-			Model:          responseModel,
-			PromptTs:       msToNaiveTS(om.Timestamp),
-			ProjectContext: cwd,
-		})
-	}
-
-	return events, newCursor, nil
+	return pairMessages(msgs, sid, cwd), nil
 }
 
 // pairMessages walks a normalized message list and pairs user prompts with
-// following gemini responses. Used by parseMonolithic.
+// following gemini responses.
 func pairMessages(msgs []normalizedMsg, sid, cwd string) []model.Event {
 	var events []model.Event
 	for i := 0; i < len(msgs); i++ {
@@ -413,24 +508,6 @@ func shouldSkipUserText(text string) bool {
 // []normalizedMsg slice (stopping at the next user message) and returns
 // joined response text and the first non-empty model string.
 func collectGeminiResponses(msgs []normalizedMsg) (text, firstModel string) {
-	var sb strings.Builder
-	for _, m := range msgs {
-		if m.Type == "user" {
-			break
-		}
-		if m.Type != "gemini" {
-			continue
-		}
-		sb.WriteString(extractContent(m.Content))
-		if firstModel == "" && m.Model != "" {
-			firstModel = m.Model
-		}
-	}
-	return sb.String(), firstModel
-}
-
-// collectGeminiResponsesOffset is the offsetMsg variant used by parseJournal.
-func collectGeminiResponsesOffset(msgs []offsetMsg) (text, firstModel string) {
 	var sb strings.Builder
 	for _, m := range msgs {
 		if m.Type == "user" {
