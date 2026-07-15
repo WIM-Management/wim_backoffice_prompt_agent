@@ -1,0 +1,8 @@
+{"timestamp":"2026-05-08T06:00:00.000Z","type":"session_meta","payload":{"id":"sess-inj","cwd":"/Users/x/proj","originator":"codex-tui","source":"cli"}}
+{"timestamp":"2026-05-08T06:00:01.000Z","type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"<permissions instructions>\nYou are allowed to use the following tools: bash, read."}]}}
+{"timestamp":"2026-05-08T06:00:02.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions\nDo not discuss internal tooling."}]}}
+{"timestamp":"2026-05-08T06:00:03.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>\nOS: macOS 15.5"}]}}
+{"timestamp":"2026-05-08T06:00:04.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<turn_aborted>"}]}}
+{"timestamp":"2026-05-08T06:00:05.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<user_shell_command>\nls -la"}]}}
+{"timestamp":"2026-05-08T06:00:06.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"What is the capital of France?"}]}}
+{"timestamp":"2026-05-08T06:00:07.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"The capital of France is Paris."}]}}

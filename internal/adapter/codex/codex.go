@@ -105,6 +105,36 @@ func (a *Adapter) Parse(file string, cursor []byte, idleCutoff time.Time) ([]mod
 	return events, fileEnd, nil
 }
 
+// isCodexSynthetic returns true for harness-injected messages that are not
+// genuine human prompts. Developer-role messages are always synthetic.
+// For user-role messages, a HasPrefix check on the trimmed text identifies
+// known injection preambles (never Contains, to avoid false positives on
+// quoted text mid-message).
+func isCodexSynthetic(role, text string) bool {
+	if role == "developer" {
+		return true
+	}
+	t := strings.TrimSpace(text)
+	injectedPrefixes := []string{
+		"<environment_context>",
+		"<permissions instructions>",
+		"<turn_aborted>",
+		"<user_instructions>",
+		"<apps_instructions>",
+		"<skills_instructions>",
+		"<collaboration_mode>",
+		"<plugins_instructions>",
+		"<user_shell_command>",
+		"# AGENTS.md instructions",
+	}
+	for _, pfx := range injectedPrefixes {
+		if strings.HasPrefix(t, pfx) {
+			return true
+		}
+	}
+	return false
+}
+
 func assembleEvents(lines []rawLine, meta sessionMetaPayload) []model.Event {
 	type pendingPrompt struct {
 		text string
@@ -114,6 +144,11 @@ func assembleEvents(lines []rawLine, meta sessionMetaPayload) []model.Event {
 	var pending *pendingPrompt
 
 	for _, l := range lines {
+		// Skip compacted records entirely — their replacement_history would
+		// double-count history already emitted in prior real records.
+		if l.Type == "compacted" {
+			continue
+		}
 		if l.Type != "response_item" {
 			continue
 		}
@@ -128,9 +163,11 @@ func assembleEvents(lines []rawLine, meta sessionMetaPayload) []model.Event {
 		switch rip.Role {
 		case "user":
 			text := joinFragments(rip.Content, "input_text")
-			if text != "" {
+			if text != "" && !isCodexSynthetic("user", text) {
 				pending = &pendingPrompt{text: text, ts: l.Timestamp}
 			}
+		case "developer":
+			// Always synthetic — skip without touching pending.
 		case "assistant":
 			if pending == nil {
 				continue

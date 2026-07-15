@@ -1,0 +1,4 @@
+{"timestamp":"2026-05-08T07:00:00.000Z","type":"session_meta","payload":{"id":"sess-cmp","cwd":"/Users/x/proj","originator":"codex-tui","source":"cli"}}
+{"timestamp":"2026-05-08T07:00:01.000Z","type":"compacted","payload":{"replacement_history":[{"role":"user","content":[{"type":"input_text","text":"Old question 1"}]},{"role":"assistant","content":[{"type":"output_text","text":"Old answer 1"}]},{"role":"user","content":[{"type":"input_text","text":"Old question 2"}]}]}}
+{"timestamp":"2026-05-08T07:00:10.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"What is 3+3?"}]}}
+{"timestamp":"2026-05-08T07:00:11.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"3+3 equals 6."}]}}

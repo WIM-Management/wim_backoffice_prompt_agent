@@ -17,6 +17,34 @@ func TestExecSessionSkipped(t *testing.T) {
 	}
 }
 
+func TestFilterInjected(t *testing.T) {
+	a := New("")
+	evs, _, err := a.Parse(filepath.Join("testdata", "injected.jsonl"), nil, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(evs) != 1 {
+		t.Fatalf("injected session: want 1 event, got %d", len(evs))
+	}
+	if evs[0].PromptText != "What is the capital of France?" {
+		t.Errorf("PromptText: want %q, got %q", "What is the capital of France?", evs[0].PromptText)
+	}
+}
+
+func TestFilterCompacted(t *testing.T) {
+	a := New("")
+	evs, _, err := a.Parse(filepath.Join("testdata", "compacted.jsonl"), nil, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(evs) != 1 {
+		t.Fatalf("compacted session: want 1 event, got %d", len(evs))
+	}
+	if evs[0].PromptText != "What is 3+3?" {
+		t.Errorf("PromptText: want %q, got %q", "What is 3+3?", evs[0].PromptText)
+	}
+}
+
 func TestInteractiveSession(t *testing.T) {
 	a := New("")
 	evs, _, err := a.Parse(filepath.Join("testdata", "interactive.jsonl"), nil, time.Time{})
