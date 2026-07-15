@@ -401,8 +401,8 @@ func TestParseCwdFromProjectsJSON(t *testing.T) {
 	projDir := "proj"
 	chatsDir := filepath.Join(home, ".gemini", "tmp", projDir, "chats")
 
-	// Write projects.json — same shape as testdata/projects.json
-	writeFile(t, filepath.Join(home, ".gemini", "tmp", projDir, "projects.json"),
+	// Write projects.json at the .gemini root (verified real location — name==tmp dir basename).
+	writeFile(t, filepath.Join(home, ".gemini", "projects.json"),
 		`{"projects":{"/Users/x/proj":"proj"}}`)
 
 	session := map[string]interface{}{

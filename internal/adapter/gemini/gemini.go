@@ -394,6 +394,8 @@ func pairMessages(msgs []normalizedMsg, sid, cwd string) []model.Event {
 // to catch residual injection leaks that arrive as type=="user" messages; it
 // is NOT a general English-phrase blocklist.
 func shouldSkipUserText(text string) bool {
+	// Trim first so leading whitespace can't smuggle a slash command / empty text past the filter.
+	text = strings.TrimSpace(text)
 	if text == "" {
 		return true
 	}
@@ -450,7 +452,9 @@ func collectGeminiResponsesOffset(msgs []offsetMsg) (text, firstModel string) {
 // Resolution order:
 //  1. directories[0] from the session file (most authoritative).
 //  2. Read <home>/.gemini/tmp/<projectDir>/.project_root (verified present in real data).
-//  3. projects.json reverse-map: {"projects":{"<abs path>":"<name>"}} → abs path for name==projectDir.
+//  3. <home>/.gemini/projects.json reverse-map: {"projects":{"<abs path>":"<name>"}}
+//     → abs path for name==projectDir (verified location: projects.json lives at the
+//     .gemini root, NOT inside tmp/<projectDir>/; name equals the tmp dir basename).
 //  4. <projectDir> basename as-is (approximate fallback).
 func (a *Adapter) resolveCwd(sessionFilePath string, directories []string) string {
 	// (a) directories array.
@@ -478,8 +482,8 @@ func (a *Adapter) resolveCwd(sessionFilePath string, directories []string) strin
 		}
 	}
 
-	// (c) projects.json reverse-map.
-	if data, err := os.ReadFile(filepath.Join(tmpProjDir, "projects.json")); err == nil {
+	// (c) projects.json reverse-map — lives at the .gemini root (verified), not tmp/<projectDir>/.
+	if data, err := os.ReadFile(filepath.Join(a.home, ".gemini", "projects.json")); err == nil {
 		var pj struct {
 			Projects map[string]string `json:"projects"`
 		}
