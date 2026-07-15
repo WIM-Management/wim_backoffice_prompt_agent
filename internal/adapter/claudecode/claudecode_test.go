@@ -111,3 +111,24 @@ func TestInterruptedNotEmittedEvenIfIdle(t *testing.T) {
 		t.Fatalf("interrupted turn emitted: %+v", evs)
 	}
 }
+
+func TestParseModelMulti(t *testing.T) {
+	evs := parseFixture(t, "model_multi.jsonl", time.Time{})
+	if len(evs) != 2 {
+		t.Fatalf("want 2 events, got %d: %+v", len(evs), evs)
+	}
+	// 첫 번째 턴: <synthetic> 줄은 건너뛰고 claude-opus-4-8 사용
+	if evs[0].Model != "claude-opus-4-8" {
+		t.Errorf("evs[0].Model = %q, want %q", evs[0].Model, "claude-opus-4-8")
+	}
+	// 두 번째 턴: claude-fable-5
+	if evs[1].Model != "claude-fable-5" {
+		t.Errorf("evs[1].Model = %q, want %q", evs[1].Model, "claude-fable-5")
+	}
+	// <synthetic> 값이 이벤트에 절대 노출되면 안 됨
+	for i, ev := range evs {
+		if ev.Model == "<synthetic>" {
+			t.Errorf("evs[%d].Model is <synthetic>, must be excluded", i)
+		}
+	}
+}

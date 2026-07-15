@@ -49,6 +49,7 @@ type rawLine struct {
 	Message     struct {
 		ID      string          `json:"id"`
 		Role    string          `json:"role"`
+		Model   string          `json:"model"`
 		Content json.RawMessage `json:"content"`
 		Usage   *struct {
 			OutputTokens int `json:"output_tokens"`
@@ -143,7 +144,7 @@ func assemble(lines []rawLine, fileIdle bool) ([]model.Event, int) {
 				break
 			}
 		}
-		resp, tokens := assembleResponse(respLines)
+		resp, tokens, respModel := assembleResponse(respLines)
 		l := lines[idx]
 		out = append(out, model.Event{
 			SourceTool:     "CLAUDE_CODE",
@@ -153,6 +154,7 @@ func assemble(lines []rawLine, fileIdle bool) ([]model.Event, int) {
 			ResponseText:   resp,
 			PromptTs:       parseTS(l.Timestamp),
 			TokenCount:     tokens,
+			Model:          respModel,
 			ProjectContext: l.Cwd + branchSuffix(l.GitBranch),
 		})
 	}
@@ -200,12 +202,14 @@ func isSynthetic(text string) bool {
 }
 
 // assembleResponse: distinct message.id 단위로 text 1회·output_tokens 1회.
-func assembleResponse(lines []rawLine) (string, *int) {
+// 세 번째 반환값은 응답 라인 중 <synthetic> 제외 첫 비어있지 않은 model 값.
+func assembleResponse(lines []rawLine) (string, *int, string) {
 	seenText := map[string]bool{}
 	seenTok := map[string]bool{}
 	var sb strings.Builder
 	total := 0
 	hasTok := false
+	respModel := ""
 	for _, l := range lines {
 		if l.Type != "assistant" || l.IsSidechain {
 			continue
@@ -218,6 +222,9 @@ func assembleResponse(lines []rawLine) (string, *int) {
 			total += l.Message.Usage.OutputTokens
 			hasTok = true
 			seenTok[id] = true
+		}
+		if respModel == "" && l.Message.Model != "" && l.Message.Model != "<synthetic>" {
+			respModel = l.Message.Model
 		}
 		var blocks []map[string]any
 		if json.Unmarshal(l.Message.Content, &blocks) == nil {
@@ -236,9 +243,9 @@ func assembleResponse(lines []rawLine) (string, *int) {
 		}
 	}
 	if !hasTok {
-		return sb.String(), nil
+		return sb.String(), nil, respModel
 	}
-	return sb.String(), &total
+	return sb.String(), &total, respModel
 }
 
 func lastAssistantTerminal(lines []rawLine) bool {
