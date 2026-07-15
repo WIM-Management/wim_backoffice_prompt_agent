@@ -1,8 +1,10 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
+	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/config"
 	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/enroll"
 )
 
@@ -32,5 +34,19 @@ func TestNeedsEnroll(t *testing.T) {
 				t.Errorf("needsEnroll = %v, want %v", got, c.want)
 			}
 		})
+	}
+}
+
+// TestEnrollDispatchRejectsStrayArg guards the footgun where `enroll <path>`
+// (path as a bare positional) was silently dropped by flag parsing, enrolling
+// the DEFAULT dir instead of the named one. A stray arg must now error out
+// before any enroll side effect runs.
+func TestEnrollDispatchRejectsStrayArg(t *testing.T) {
+	err := cmdEnrollDispatch(config.Config{}, []string{"/home/x/.claude-jax"})
+	if err == nil {
+		t.Fatal("stray positional arg must be rejected, got nil error")
+	}
+	if !strings.Contains(err.Error(), "--config-dir") {
+		t.Errorf("error should point at --config-dir, got: %v", err)
 	}
 }
