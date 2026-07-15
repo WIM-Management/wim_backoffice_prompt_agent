@@ -29,6 +29,10 @@ type OAuthConfig struct {
 	ClientID     string
 	ClientSecret string
 	HostedDomain string // optional `hd` hint, e.g. "wimcorp.co.kr"
+	// Port pins the loopback callback listener to a fixed port (0 = random).
+	// Needed on headless/remote boxes so `ssh -L PORT:127.0.0.1:PORT` can
+	// tunnel the browser callback from your laptop back to the agent.
+	Port int
 }
 
 // GoogleIDToken runs the OAuth 2.0 PKCE loopback flow: opens the user's browser,
@@ -47,17 +51,26 @@ func (c OAuthConfig) GoogleIDToken() (string, error) {
 		return "", err
 	}
 
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", c.Port))
 	if err != nil {
 		return "", fmt.Errorf("loopback listen: %w", err)
 	}
 	defer ln.Close()
-	redirectURI := fmt.Sprintf("http://%s/callback", ln.Addr().String())
+	port := ln.Addr().(*net.TCPAddr).Port
+	redirectURI := fmt.Sprintf("http://127.0.0.1:%d/callback", port)
 
 	authURL := c.authorizeURL(redirectURI, challenge, state)
-	if err := openBrowser(authURL); err != nil {
-		fmt.Printf("Open this URL in your browser to authorize:\n%s\n", authURL)
+	// Always try to open the browser AND always print the URL — on headless/
+	// remote boxes `xdg-open` "succeeds" (returns nil) without ever opening a
+	// browser, so relying on its error would silently hide the URL.
+	_ = openBrowser(authURL)
+	fmt.Printf("\n브라우저를 자동으로 여는 중입니다. 열리지 않으면 아래 URL을 브라우저에 직접 붙여넣어 인증하세요:\n\n%s\n\n", authURL)
+	if c.Port != 0 {
+		// Fixed port → almost certainly a headless/SSH session. Remind the user
+		// how to tunnel the callback back to this machine from their laptop.
+		fmt.Printf("원격(SSH) 환경이면 로컬 PC에서 아래처럼 포트 포워딩한 뒤 위 URL을 로컬 브라우저에서 여세요:\n  ssh -L %d:127.0.0.1:%d <이 서버>\n\n", port, port)
 	}
+	fmt.Println("브라우저 인증을 기다리는 중... (최대 5분)")
 
 	code, err := waitForCode(ln, state)
 	if err != nil {

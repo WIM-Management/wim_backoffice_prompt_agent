@@ -219,12 +219,13 @@ func cmdUpdate(cfg config.Config) error {
 
 // cmdEnrollDispatch parses `enroll` flags and routes to enroll or forget:
 //
-//	enroll [--config-dir <path>]           config 폴더 등록(기본 ~/.claude)
-//	enroll --forget --config-dir <path>    폴더 등록해제 + 토큰 삭제
+//	enroll [--config-dir <path>] [--port N]  config 폴더 등록(기본 ~/.claude, --port로 콜백 포트 고정)
+//	enroll --forget --config-dir <path>      폴더 등록해제 + 토큰 삭제
 func cmdEnrollDispatch(cfg config.Config, argv []string) error {
 	fs := flag.NewFlagSet("enroll", flag.ContinueOnError)
 	dir := fs.String("config-dir", "", "Claude 설정 폴더(절대경로 또는 ~ 기준 이름, 기본 ~/.claude)")
 	forget := fs.Bool("forget", false, "해당 폴더 등록해제 + 토큰 삭제")
+	port := fs.Int("port", 0, "OAuth 콜백 고정 포트(헤드리스/SSH: ssh -L PORT:127.0.0.1:PORT 포워딩용, 기본 랜덤)")
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
@@ -232,13 +233,13 @@ func cmdEnrollDispatch(cfg config.Config, argv []string) error {
 	if *forget {
 		return cmdForget(cfg, configDir)
 	}
-	return cmdEnroll(cfg, configDir)
+	return cmdEnroll(cfg, configDir, *port)
 }
 
 // cmdEnroll runs the device enrollment flow for one config dir: register it,
 // Google OAuth PKCE loopback → id_token → backend enroll → token stored under
 // the dir's token key. 폴더마다 다른 사람이 로그인하면 폴더별 토큰이 분리된다.
-func cmdEnroll(cfg config.Config, configDir string) error {
+func cmdEnroll(cfg config.Config, configDir string, port int) error {
 	if cfg.GoogleClientID == "" {
 		return fmt.Errorf(
 			"OAuth client not configured — set WIM_PROMPT_GOOGLE_CLIENT_ID (and " +
@@ -256,6 +257,7 @@ func cmdEnroll(cfg config.Config, configDir string) error {
 		ClientID:     cfg.GoogleClientID,
 		ClientSecret: cfg.GoogleClientSecret,
 		HostedDomain: cfg.GoogleHostedDomain,
+		Port:         port,
 	}
 	host, _ := os.Hostname()
 	if host == "" {
@@ -316,7 +318,7 @@ func ensureEnrolled(cfg config.Config) error {
 		if token != "" {
 			fmt.Println("기존 기기 등록이 만료·폐기되어 재등록합니다.")
 		}
-		return cmdEnroll(cfg, registry.DefaultConfigDir())
+		return cmdEnroll(cfg, registry.DefaultConfigDir(), 0)
 	}
 	return nil
 }
@@ -426,7 +428,8 @@ func cmdStatus(cfg config.Config) {
 func printUsage() {
 	fmt.Fprintln(os.Stderr, "Usage: wim-backoffice-prompt-agent <command>")
 	fmt.Fprintln(os.Stderr, "Commands:")
-	fmt.Fprintln(os.Stderr, "  enroll [--config-dir <path>]           Enroll a Claude config dir (default ~/.claude)")
+	fmt.Fprintln(os.Stderr, "  enroll [--config-dir <path>] [--port N] Enroll a Claude config dir (default ~/.claude)")
+	fmt.Fprintln(os.Stderr, "                                          --port pins the OAuth callback port for headless/SSH (ssh -L N:127.0.0.1:N)")
 	fmt.Fprintln(os.Stderr, "  enroll --forget --config-dir <path>    De-register a config dir + delete its token")
 	fmt.Fprintln(os.Stderr, "  install    Install periodic daemon (launchd/systemd/Task Scheduler)")
 	fmt.Fprintln(os.Stderr, "  uninstall  Remove periodic daemon")
