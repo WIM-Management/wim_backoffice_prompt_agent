@@ -2,3 +2,7 @@ bin/
 *.test
 coverage.out
 .idea/
+
+# 로컬 에이전트 도구 운영 산출물 — 저장소에 커밋 금지
+.omc/
+.worktrees/
