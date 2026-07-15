@@ -269,6 +269,15 @@ func cmdEnrollDispatch(cfg config.Config, argv []string) error {
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
+	// A bare path is a natural mistake (`enroll ~/.claude-jax`), but flag stops at
+	// the first non-flag arg and silently drops it — enrolling the DEFAULT dir
+	// under the wrong identity. Reject stray args so the folder must be named with
+	// --config-dir rather than silently mis-enrolled.
+	if fs.NArg() > 0 {
+		return fmt.Errorf(
+			"unexpected argument %q — 폴더는 --config-dir 로 지정하세요 (예: enroll --config-dir %s)",
+			fs.Arg(0), fs.Arg(0))
+	}
 	configDir := resolveConfigDir(*dir)
 	if *forget {
 		return cmdForget(cfg, configDir)
