@@ -13,8 +13,8 @@ func TestShouldCheckUpdate(t *testing.T) {
 		want bool
 	}{
 		{"zero(첫 실행)", time.Time{}, true},
-		{"23h 전 → 아직", now.Add(-23 * time.Hour), false},
-		{"24h 전 → 체크", now.Add(-24 * time.Hour), true},
+		{"1h 전 → 아직", now.Add(-1 * time.Hour), false},
+		{"2h 전 → 체크", now.Add(-2 * time.Hour), true},
 		{"48h 전 → 체크", now.Add(-48 * time.Hour), true},
 	}
 	for _, c := range cases {

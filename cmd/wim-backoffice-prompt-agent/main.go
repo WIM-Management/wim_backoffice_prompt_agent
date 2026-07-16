@@ -202,7 +202,12 @@ func resolveConfigDir(v string) string {
 	return filepath.Clean(filepath.Join(home, v))
 }
 
-const updateCheckInterval = 24 * time.Hour
+// updateCheckInterval throttles how often run-once actually hits GitHub for a
+// newer release. 2h keeps new-release rollout within a few hours (vs. up to a
+// day) while staying well under GitHub's unauthenticated 60 req/h/IP limit even
+// with many agents behind one office NAT — releases/latest is an API call, so
+// at 2h that's ~0.5 req/h per agent.
+const updateCheckInterval = 2 * time.Hour
 
 // shouldCheckUpdate reports whether enough time passed since the last check.
 func shouldCheckUpdate(last, now time.Time) bool {
