@@ -6,7 +6,6 @@ import (
 	"time"
 )
 
-
 // Config holds runtime configuration for wim-backoffice-prompt-agent.
 type Config struct {
 	BaseURL      string
