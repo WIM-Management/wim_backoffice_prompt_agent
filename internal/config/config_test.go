@@ -39,3 +39,15 @@ func TestDefaultConfig_EnvOverride(t *testing.T) {
 		t.Errorf("BaseURL env override: want https://example.com, got %v", cfg.BaseURL)
 	}
 }
+
+func TestDefaultEnrollURL(t *testing.T) {
+	os.Unsetenv("WIM_PROMPT_ENROLL_URL")
+	if got := Default().EnrollURL; got != "https://backoffice.wimcorp.co.kr/prompt-agent/enroll" {
+		t.Fatalf("default EnrollURL = %q", got)
+	}
+	os.Setenv("WIM_PROMPT_ENROLL_URL", "https://x.example/e")
+	defer os.Unsetenv("WIM_PROMPT_ENROLL_URL")
+	if got := Default().EnrollURL; got != "https://x.example/e" {
+		t.Fatalf("env override EnrollURL = %q", got)
+	}
+}

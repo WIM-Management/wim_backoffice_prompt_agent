@@ -264,13 +264,12 @@ func cmdUpdate(cfg config.Config) error {
 
 // cmdEnrollDispatch parses `enroll` flags and routes to enroll or forget:
 //
-//	enroll [--config-dir <path>] [--port N]  config 폴더 등록(기본 ~/.claude, --port로 콜백 포트 고정)
-//	enroll --forget --config-dir <path>      폴더 등록해제 + 토큰 삭제
+//	enroll [--config-dir <path>]         config 폴더 등록(기본 ~/.claude)
+//	enroll --forget --config-dir <path>  폴더 등록해제 + 토큰 삭제
 func cmdEnrollDispatch(cfg config.Config, argv []string) error {
 	fs := flag.NewFlagSet("enroll", flag.ContinueOnError)
 	dir := fs.String("config-dir", "", "Claude 설정 폴더(절대경로 또는 ~ 기준 이름, 기본 ~/.claude)")
 	forget := fs.Bool("forget", false, "해당 폴더 등록해제 + 토큰 삭제")
-	port := fs.Int("port", 0, "OAuth 콜백 고정 포트(헤드리스/SSH: ssh -L PORT:127.0.0.1:PORT 포워딩용, 기본 랜덤)")
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
@@ -287,41 +286,44 @@ func cmdEnrollDispatch(cfg config.Config, argv []string) error {
 	if *forget {
 		return cmdForget(cfg, configDir)
 	}
-	return cmdEnroll(cfg, configDir, *port)
+	return cmdEnroll(cfg, configDir)
 }
 
 // cmdEnroll runs the device enrollment flow for one config dir: register it,
-// Google OAuth PKCE loopback → id_token → backend enroll → token stored under
-// the dir's token key. 폴더마다 다른 사람이 로그인하면 폴더별 토큰이 분리된다.
-func cmdEnroll(cfg config.Config, configDir string, port int) error {
-	if cfg.GoogleClientID == "" {
-		return fmt.Errorf(
-			"OAuth client not configured — set WIM_PROMPT_GOOGLE_CLIENT_ID (and " +
-				"WIM_PROMPT_GOOGLE_CLIENT_SECRET) for the desktop OAuth client")
-	}
+// obtain a Google id_token by pasting it from the web enroll page, POST it to
+// backend enroll, and store the returned device token under the dir's token key.
+func cmdEnroll(cfg config.Config, configDir string) error {
 	if err := os.MkdirAll(cfg.Dir, 0o700); err != nil {
 		return err
 	}
-	// 레지스트리 upsert 먼저 — slug 충돌 등을 OAuth 로그인 전에 걸러낸다.
+	// 레지스트리 upsert 먼저 — slug 충돌 등을 로그인 전에 걸러낸다.
 	entry, err := registry.New(registryPath(cfg)).Upsert(configDir)
 	if err != nil {
 		return err
 	}
-	oauth := enroll.OAuthConfig{
-		ClientID:     cfg.GoogleClientID,
-		ClientSecret: cfg.GoogleClientSecret,
-		HostedDomain: cfg.GoogleHostedDomain,
-		Port:         port,
+
+	tty, err := openPasteInput()
+	if err != nil {
+		return fmt.Errorf(
+			"제어 터미널을 열 수 없습니다(무인 환경?) — 브라우저가 있는 환경에서 "+
+				"`wim-backoffice-prompt-agent enroll`을 실행하세요: %w", err)
 	}
+	defer tty.Close()
+	// 긴 JWT id_token(>1KB)을 canonical 터미널에 붙여넣으면 MAX_CANON(macOS 1024B)
+	// 라인버퍼 초과로 읽기가 멈춘다. 읽는 동안 non-canonical로 전환하고 복원한다.
+	restorePaste := configurePasteInput(tty)
+	defer restorePaste()
+
 	host, _ := os.Hostname()
 	if host == "" {
 		host = "unknown"
 	}
 	label := host
 	if !registry.IsDefault(configDir) {
-		label = host + ":" + registry.Slug(configDir) // 백엔드에서 어느 폴더인지 식별
+		label = host + ":" + registry.Slug(configDir)
 	}
-	e := enroll.New(cfg.BaseURL, enroll.NewKeychainStore(entry.TokenKey), oauth.GoogleIDToken)
+	e := enroll.New(cfg.BaseURL, enroll.NewKeychainStore(entry.TokenKey),
+		enroll.PasteIDToken(cfg.EnrollURL, tty))
 	if err := e.Run(label); err != nil {
 		return err
 	}
@@ -372,7 +374,7 @@ func ensureEnrolled(cfg config.Config) error {
 		if token != "" {
 			fmt.Println("기존 기기 등록이 만료·폐기되어 재등록합니다.")
 		}
-		return cmdEnroll(cfg, registry.DefaultConfigDir(), 0)
+		return cmdEnroll(cfg, registry.DefaultConfigDir())
 	}
 	return nil
 }
@@ -457,7 +459,7 @@ func cmdStatus(cfg config.Config) {
 	fmt.Printf("Dir:          %s\n", cfg.Dir)
 	fmt.Printf("BaseURL:      %s\n", cfg.BaseURL)
 	// client id는 기밀 아님 — 내장(릴리스)/env/미설정 진단용
-	fmt.Printf("ClientID:     %s\n", clientIDStatus(cfg))
+	fmt.Printf("EnrollURL:    %s\n", cfg.EnrollURL)
 	fmt.Printf("ScanInterval: %s\n", cfg.ScanInterval)
 	fmt.Printf("IdleCutoff:   %s\n", cfg.IdleCutoff)
 	fmt.Printf("OS:           %s\n", runtime.GOOS)
@@ -482,23 +484,11 @@ func cmdStatus(cfg config.Config) {
 func printUsage() {
 	fmt.Fprintln(os.Stderr, "Usage: wim-backoffice-prompt-agent <command>")
 	fmt.Fprintln(os.Stderr, "Commands:")
-	fmt.Fprintln(os.Stderr, "  enroll [--config-dir <path>] [--port N] Enroll a Claude config dir (default ~/.claude)")
-	fmt.Fprintln(os.Stderr, "                                          --port pins the OAuth callback port for headless/SSH (ssh -L N:127.0.0.1:N)")
+	fmt.Fprintln(os.Stderr, "  enroll [--config-dir <path>]            Enroll a Claude config dir (default ~/.claude)")
 	fmt.Fprintln(os.Stderr, "  enroll --forget --config-dir <path>    De-register a config dir + delete its token")
 	fmt.Fprintln(os.Stderr, "  install    Install periodic daemon (launchd/systemd/Task Scheduler)")
 	fmt.Fprintln(os.Stderr, "  uninstall  Remove periodic daemon")
 	fmt.Fprintln(os.Stderr, "  run-once   Scan, redact, and upload prompts once (all enrolled dirs)")
 	fmt.Fprintln(os.Stderr, "  update     Check for and install the latest release")
 	fmt.Fprintln(os.Stderr, "  status     Show current configuration + enrolled dirs")
-}
-
-// clientIDStatus describes where the OAuth client id came from (diagnostics for enroll support).
-func clientIDStatus(cfg config.Config) string {
-	if cfg.GoogleClientID == "" {
-		return "(missing — env 또는 릴리스 바이너리 필요)"
-	}
-	if os.Getenv("WIM_PROMPT_GOOGLE_CLIENT_ID") != "" {
-		return cfg.GoogleClientID + " (env)"
-	}
-	return cfg.GoogleClientID + " (embedded)"
 }

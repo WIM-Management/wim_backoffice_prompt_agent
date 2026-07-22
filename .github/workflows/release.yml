@@ -25,17 +25,7 @@ jobs:
         run: go test ./...
 
       - name: Build binaries (darwin arm64/amd64, linux amd64/arm64, windows amd64)
-        env:
-          # Google "Desktop app" OAuth 클라이언트 — 데스크톱 앱 secret은 Google 정책상
-          # 기밀 아님(내장 허용). 직원이 env 설정 없이 enroll할 수 있게 바이너리에 주입한다.
-          GOOGLE_CLIENT_ID: ${{ secrets.WIM_PROMPT_GOOGLE_CLIENT_ID }}
-          GOOGLE_CLIENT_SECRET: ${{ secrets.WIM_PROMPT_GOOGLE_CLIENT_SECRET }}
         run: |
-          if [ -z "$GOOGLE_CLIENT_ID" ] || [ -z "$GOOGLE_CLIENT_SECRET" ]; then
-            echo "::error::WIM_PROMPT_GOOGLE_CLIENT_ID/SECRET repo secrets가 비어 있음 — enroll 불가 바이너리가 되므로 중단"
-            exit 1
-          fi
-          CONFIG_PKG=github.com/WIM-Management/wim_backoffice_prompt_agent/internal/config
           mkdir -p dist
           for target in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64; do
             goos="${target%/*}" goarch="${target#*/}" ext="" gui=""
@@ -46,7 +36,7 @@ jobs:
             if [ "$goos" = "windows" ]; then ext=".exe" gui="-H=windowsgui"; fi
             GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 \
               go build -trimpath \
-                -ldflags "-s -w ${gui} -X main.Version=${GITHUB_REF_NAME} -X ${CONFIG_PKG}.DefaultGoogleClientID=${GOOGLE_CLIENT_ID} -X ${CONFIG_PKG}.DefaultGoogleClientSecret=${GOOGLE_CLIENT_SECRET}" \
+                -ldflags "-s -w ${gui} -X main.Version=${GITHUB_REF_NAME}" \
                 -o "dist/wim-backoffice-prompt-agent-${goos}-${goarch}${ext}" \
                 ./cmd/wim-backoffice-prompt-agent
           done
