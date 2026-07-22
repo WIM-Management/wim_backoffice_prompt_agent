@@ -305,10 +305,14 @@ func cmdEnroll(cfg config.Config, configDir string) error {
 	tty, err := openPasteInput()
 	if err != nil {
 		return fmt.Errorf(
-			"제어 터미널을 열 수 없습니다(무인 환경?) — 브라우저가 있는 환경에서 " +
+			"제어 터미널을 열 수 없습니다(무인 환경?) — 브라우저가 있는 환경에서 "+
 				"`wim-backoffice-prompt-agent enroll`을 실행하세요: %w", err)
 	}
 	defer tty.Close()
+	// 긴 JWT id_token(>1KB)을 canonical 터미널에 붙여넣으면 MAX_CANON(macOS 1024B)
+	// 라인버퍼 초과로 읽기가 멈춘다. 읽는 동안 non-canonical로 전환하고 복원한다.
+	restorePaste := configurePasteInput(tty)
+	defer restorePaste()
 
 	host, _ := os.Hostname()
 	if host == "" {
@@ -488,4 +492,3 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "  update     Check for and install the latest release")
 	fmt.Fprintln(os.Stderr, "  status     Show current configuration + enrolled dirs")
 }
-
