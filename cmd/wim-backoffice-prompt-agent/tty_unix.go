@@ -5,8 +5,8 @@ package main
 import (
 	"io"
 	"os"
-	"os/exec"
-	"strings"
+
+	"golang.org/x/sys/unix"
 )
 
 // openPasteInput opens the controlling terminal for reading the pasted enroll
@@ -20,30 +20,28 @@ func openPasteInput() (io.ReadCloser, error) {
 // configurePasteInput switches the terminal to non-canonical mode for the paste
 // read, returning a restore func. A Google id_token JWT is >1KB, but a canonical
 // terminal caps a single input line at MAX_CANON (1024 bytes on macOS); pasting
-// a longer line stalls forever because the trailing newline never enters the
-// line buffer. Disabling ICANON (via stty, keeping echo/signals/ICRNL) removes
-// the line-length cap. Best-effort: if r isn't a real tty or stty is missing we
-// return a no-op — enroll still works for tokens under the cap (no regression).
+// a longer line is silently truncated at the cap (or stalls waiting for a
+// newline that can't fit). Clearing ICANON in-process on the exact fd we read
+// removes the cap while keeping echo, signals, and CR→NL translation, so the
+// bufio ReadString('\n') in PasteIDToken works unchanged. Best-effort: if r
+// isn't a real tty the ioctl fails and we return a no-op (tokens under the cap
+// still enroll — no regression).
 func configurePasteInput(r io.Reader) func() {
 	f, ok := r.(*os.File)
 	if !ok {
 		return func() {}
 	}
-	saved, err := runStty(f, "-g")
+	fd := int(f.Fd())
+	old, err := unix.IoctlGetTermios(fd, ioctlReadTermios)
 	if err != nil {
 		return func() {}
 	}
-	if _, err := runStty(f, "-icanon", "min", "1", "time", "0"); err != nil {
+	raw := *old
+	raw.Lflag &^= unix.ICANON
+	raw.Cc[unix.VMIN] = 1
+	raw.Cc[unix.VTIME] = 0
+	if err := unix.IoctlSetTermios(fd, ioctlWriteTermios, &raw); err != nil {
 		return func() {}
 	}
-	return func() { _, _ = runStty(f, strings.TrimSpace(saved)) }
-}
-
-// runStty runs `stty <args>` against the given terminal (its stdin), returning
-// stdout. Used to read (`-g`) and set the terminal's line discipline.
-func runStty(tty *os.File, args ...string) (string, error) {
-	cmd := exec.Command("stty", args...)
-	cmd.Stdin = tty
-	out, err := cmd.Output()
-	return string(out), err
+	return func() { _ = unix.IoctlSetTermios(fd, ioctlWriteTermios, old) }
 }
