@@ -76,20 +76,23 @@ git push origin v0.2.0
 ./wim-backoffice-prompt-agent enroll
 ```
 
-**릴리스 바이너리는 env 설정이 필요 없다** — Google OAuth 클라이언트 id/secret이 릴리스 빌드에 내장돼 있다(CI가 repo secrets `WIM_PROMPT_GOOGLE_CLIENT_ID/SECRET`를 ldflags `-X internal/config.DefaultGoogleClientID/Secret`으로 주입; 데스크톱 앱 client secret은 Google 정책상 기밀 아님). 로컬 개발 빌드이거나 다른 클라이언트/백엔드를 쓰려면 env로 override:
+1. 브라우저에서 `https://backoffice.wimcorp.co.kr/prompt-agent/enroll` 열고 회사 Google 계정으로 로그인
+2. 화면에 표시된 토큰을 복사
+3. 터미널에서 `wim-backoffice-prompt-agent enroll` 실행 → 프롬프트에 붙여넣기
+
+맥·윈도우·리눅스(SSH 포함) 모두 동일합니다. 포트/터널 설정이 필요 없습니다.
+
+`POST /api/v1/prompt-insights/enroll`로 디바이스 토큰을 받아 저장합니다(mac Keychain / Linux `~/.wim-backoffice-prompt-agent/device-token` 0600 파일 / Windows DPAPI 파일).
+
+staging 백엔드 대상 테스트 시에만 env override (백엔드 base URL과 enroll 페이지 URL을 함께):
 
 ```bash
-export WIM_PROMPT_GOOGLE_CLIENT_ID=<desktop-client-id>
-export WIM_PROMPT_GOOGLE_CLIENT_SECRET=<desktop-client-secret>   # 데스크톱 client는 비밀 아님
-export WIM_PROMPT_BASE_URL=https://staging-backoffice-api.wimcorp.co.kr   # 기본은 prod — staging 테스트 시에만
+export WIM_PROMPT_BASE_URL=https://staging-backoffice-api.wimcorp.co.kr
+export WIM_PROMPT_ENROLL_URL=https://staging-backoffice.wimcorp.co.kr/prompt-agent/enroll
 ./wim-backoffice-prompt-agent enroll
 ```
 
-Google OAuth 2.0 **PKCE loopback** 플로우를 실행합니다 — 브라우저를 열어 로그인하면 `127.0.0.1` 콜백으로 인가 코드를 받아 Google `id_token`으로 교환하고, `POST /api/v1/prompt-insights/enroll`로 디바이스 토큰을 받아 저장합니다(mac Keychain / Linux `~/.wim-backoffice-prompt-agent/device-token` 0600 파일 / Windows DPAPI 파일).
-
 **전제 조건:**
-- Google Cloud **"Desktop app" OAuth client**의 id/secret을 위 env로 설정.
-- 백엔드가 그 client_id를 audience로 받아들이도록 Vault `oauth2.google.agent-client-id`에 같은 데스크톱 client_id 설정.
 - 백엔드 `employees`에 본인 행의 `email`이 채워져 있어야 함(없으면 enroll 500: "일치하는 직원이 없음").
 
 #### 공유 머신 — 여러 사람이 각자 폴더로 (`--config-dir`)
@@ -156,12 +159,10 @@ WIM_PROMPT_BASE_URL=https://staging-backoffice-api.wimcorp.co.kr ./wim-backoffic
 
 ## 설정
 
-| 환경 변수                          | 기본값                                          | 설명                                       |
-|------------------------------------|-------------------------------------------------|--------------------------------------------|
-| `WIM_PROMPT_BASE_URL`              | `https://backoffice-api.wimcorp.co.kr` (prod)  | enroll·업로드 대상 백엔드 base URL.         |
-| `WIM_PROMPT_GOOGLE_CLIENT_ID`      | (미설정)                                        | 데스크톱 OAuth client id (`enroll`에 필수). |
-| `WIM_PROMPT_GOOGLE_CLIENT_SECRET`  | (미설정)                                        | 데스크톱 OAuth client secret (비밀 아님).   |
-| `WIM_PROMPT_GOOGLE_HD`             | `wimcorp.co.kr`                                 | Google `hd` 호스티드 도메인 힌트.          |
+| 환경 변수              | 기본값                                                    | 설명                                          |
+|------------------------|-----------------------------------------------------------|-----------------------------------------------|
+| `WIM_PROMPT_BASE_URL`  | `https://backoffice-api.wimcorp.co.kr` (prod)            | enroll·업로드 대상 백엔드 base URL.           |
+| `WIM_PROMPT_ENROLL_URL`| `https://backoffice.wimcorp.co.kr/prompt-agent/enroll`   | 웹 로그인으로 id_token을 발급/표시하는 페이지. |
 
 스캔 주기(15분)·idle 임계(10분)·데이터 디렉터리 등은 컴파일 내장 기본값(`internal/config/config.go`). 설정 파일은 필요 없습니다.
 
