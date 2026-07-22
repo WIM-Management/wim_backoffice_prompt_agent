@@ -34,7 +34,7 @@ type Adapter struct {
 	winnerMap map[string]string // sessionId -> winning file path (lazy, built once per instance)
 }
 
-func New(home string) *Adapter { return &Adapter{home: home} }
+func New(home string) *Adapter  { return &Adapter{home: home} }
 func (a *Adapter) Name() string { return "GEMINI" }
 
 // emittedSetCap is the maximum number of identities retained in the emitted set.
@@ -231,7 +231,9 @@ type monolithicSession struct {
 }
 
 type monolithicMsg struct {
-	ID        int64           `json:"id"`
+	// id is unused; newer Gemini writes it as a UUID string (older: int), so
+	// keep it as RawMessage — its JSON type must not gate parsing the session.
+	ID        json.RawMessage `json:"id"`
 	Timestamp int64           `json:"timestamp"` // milliseconds epoch
 	Type      string          `json:"type"`      // "user", "gemini", "info"
 	Content   json.RawMessage `json:"content"`   // string OR [{text:...}]
@@ -247,7 +249,7 @@ type journalHeader struct {
 // journalLine covers both message lines and $set lines.
 type journalLine struct {
 	Set       *json.RawMessage `json:"$set,omitempty"`
-	ID        int64            `json:"id,omitempty"`
+	ID        json.RawMessage  `json:"id,omitempty"` // unused; UUID string or int — RawMessage tolerates both
 	Timestamp int64            `json:"timestamp,omitempty"`
 	Type      string           `json:"type,omitempty"`
 	Content   json.RawMessage  `json:"content,omitempty"`

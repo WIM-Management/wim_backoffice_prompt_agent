@@ -228,6 +228,38 @@ func TestMonolithicOnly(t *testing.T) {
 	}
 }
 
+// Regression: newer Gemini writes message `id` as a UUID string, not an int.
+// The adapter must parse those sessions instead of skipping them as corrupt
+// (id is not used, so its JSON type must not gate parsing).
+func TestMonolithicStringID(t *testing.T) {
+	home := t.TempDir()
+	chatsDir := filepath.Join(home, ".gemini", "tmp", "proj", "chats")
+
+	src, err := os.ReadFile("testdata/monolithic_stringid.json")
+	if err != nil {
+		t.Fatalf("read testdata/monolithic_stringid.json: %v", err)
+	}
+	writeFile(t, filepath.Join(chatsDir, "session-1720-strid.json"), string(src))
+
+	a := New(home)
+	paths, _ := a.SessionPaths()
+
+	var prompts []string
+	for _, p := range paths {
+		evs, _, err := a.Parse(p, nil, time.Time{})
+		if err != nil {
+			t.Fatalf("Parse: %v", err)
+		}
+		for _, ev := range evs {
+			prompts = append(prompts, ev.PromptText)
+		}
+	}
+
+	if len(prompts) != 1 || prompts[0] != "from string id monolithic" {
+		t.Errorf("expected 1 prompt 'from string id monolithic', got %v", prompts)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Unit test: authoritative — pure winner-selection logic
 // ---------------------------------------------------------------------------
@@ -236,9 +268,9 @@ func TestAuthoritativeSelection(t *testing.T) {
 	// Simulate the winner-selection logic directly using pathPriority.
 	// Three paths, all with same sessionId: nested wins.
 	paths := []string{
-		"/h/.gemini/tmp/p/chats/session-1.json",    // monolithic, priority 1
-		"/h/.gemini/tmp/p/chats/session-1.jsonl",   // journal, priority 2
-		"/h/.gemini/tmp/p/chats/uuid1/file.jsonl",  // nested, priority 0
+		"/h/.gemini/tmp/p/chats/session-1.json",   // monolithic, priority 1
+		"/h/.gemini/tmp/p/chats/session-1.jsonl",  // journal, priority 2
+		"/h/.gemini/tmp/p/chats/uuid1/file.jsonl", // nested, priority 0
 	}
 
 	// Replicate the winner-selection algorithm.
@@ -276,7 +308,9 @@ func TestParseInfoJournal(t *testing.T) {
 		t.Fatalf("SessionPaths: %v", err)
 	}
 
-	var evs []interface{ GetFields() (string, string, string) }
+	var evs []interface {
+		GetFields() (string, string, string)
+	}
 	type fields struct{ prompt, response, model string }
 	var got []fields
 	for _, p := range paths {
