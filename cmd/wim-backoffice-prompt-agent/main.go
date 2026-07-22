@@ -11,7 +11,6 @@ import (
 
 	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/adapter/claudecode"
 	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/adapter/codex"
-	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/adapter/gemini"
 	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/agentlog"
 	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/config"
 	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/daemon"
@@ -119,20 +118,20 @@ func runOnce(cfg config.Config) error {
 		}
 	}
 
-	// 머신 패스: codex/gemini는 primary(~/.claude) 토큰으로 1회만 수집.
+	// 머신 패스: codex는 primary(~/.claude) 토큰으로 1회만 수집.
 	home, homeErr := os.UserHomeDir()
 	if homeErr != nil {
-		// home을 못 구하면 codex/gemini 글롭이 빈 경로가 돼 엉뚱한 스캔이 되므로 머신 패스를 건너뛴다.
+		// home을 못 구하면 codex 글롭이 빈 경로가 돼 엉뚱한 스캔이 되므로 머신 패스를 건너뛴다.
 		agentlog.Printf("머신 수집 skip: home 디렉터리 결정 실패: %v", homeErr)
 	} else if primary, ok := registry.PrimaryEntry(entries); ok {
 		if tok, err := enroll.NewKeychainStore(primary.TokenKey).Get(); err == nil && tok != "" {
-			machineAdapters := []model.Adapter{codex.New(home), gemini.New(home)}
+			machineAdapters := []model.Adapter{codex.New(home)}
 			if err := collectWith(cfg, store, primary, machineAdapters); err != nil {
-				agentlog.Printf("머신 수집 실패 [codex/gemini]: %v", err)
-				failed = append(failed, "codex/gemini")
+				agentlog.Printf("머신 수집 실패 [codex]: %v", err)
+				failed = append(failed, "codex")
 			}
 		} else {
-			agentlog.Printf("머신 수집 skip: primary 토큰 없음 (codex/gemini 미수집)")
+			agentlog.Printf("머신 수집 skip: primary 토큰 없음 (codex 미수집)")
 		}
 	} else {
 		agentlog.Printf("머신 수집 skip: primary 엔트리 없음")

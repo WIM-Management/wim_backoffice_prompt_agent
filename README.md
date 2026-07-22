@@ -4,15 +4,15 @@ WIM 백오피스 **프롬프트 인사이트** 로컬 수집 에이전트.
 
 ## 무엇이고 왜
 
-`wim-backoffice-prompt-agent`는 각 개발자 머신에서 백그라운드로 돌며, AI 코딩 CLI들의 **로컬 세션 파일**(**Claude Code** `~/.claude/projects/**/*.jsonl`, **Codex** `~/.codex/sessions/**/rollout-*.jsonl`, **Gemini CLI** `~/.gemini/tmp/**/chats/*`)에서 완결된 대화 턴(프롬프트 + 응답)을 주기적으로 읽습니다. 시크릿을 마스킹하고, 로컬 디스크 큐에 영속한 뒤, 배치로 WIM 백엔드(`PATCH /api/v1/prompt-insights/events`)에 업로드합니다.
+`wim-backoffice-prompt-agent`는 각 개발자 머신에서 백그라운드로 돌며, AI 코딩 CLI들의 **로컬 세션 파일**(**Claude Code** `~/.claude/projects/**/*.jsonl`, **Codex** `~/.codex/sessions/**/rollout-*.jsonl`)에서 완결된 대화 턴(프롬프트 + 응답)을 주기적으로 읽습니다. 시크릿을 마스킹하고, 로컬 디스크 큐에 영속한 뒤, 배치로 WIM 백엔드(`PATCH /api/v1/prompt-insights/events`)에 업로드합니다.
 
 이 방식의 장점:
 
 - **정액제 유지** — LLM을 게이트웨이/종량제로 우회하지 않고 로컬 파일만 읽으므로 토큰 추가 비용이 없습니다.
-- **멀티벤더** — 어댑터 계층으로 도구를 확장합니다. 현재 **Claude Code**(`~/.claude`)·**Codex**(`~/.codex`)·**Gemini CLI**(`~/.gemini`) 3종을 수집하며, 이후(Cursor 등)는 어댑터 추가로 확장.
+- **멀티벤더** — 어댑터 계층으로 도구를 확장합니다. 현재 **Claude Code**(`~/.claude`)·**Codex**(`~/.codex`) 2종을 수집하며, 이후(Cursor 등)는 어댑터 추가로 확장.
 - **사람 단위 귀속** — 머신별 enroll(Google 로그인 → `employee.email`)로, 계정 공유와 무관하게 실제 사람에 귀속됩니다.
 
-> 수집 대상은 **로컬 파일에 기록되는 CLI 도구**(Claude Code·Codex·Gemini CLI)뿐입니다. 서버사이드 봇(Wimmy)·웹챗(claude.ai 웹)은 로컬에 세션이 안 남으므로 이 에이전트로는 수집되지 않습니다(범위 밖).
+> 수집 대상은 **로컬 파일에 기록되는 CLI 도구**(Claude Code·Codex)뿐입니다. 서버사이드 봇(Wimmy)·웹챗(claude.ai 웹)은 로컬에 세션이 안 남으므로 이 에이전트로는 수집되지 않습니다(범위 밖).
 
 > **보관 기간(30일) 제약**: Claude Code는 시작 시 `cleanupPeriodDays`(기본 **30일**)보다 오래된 세션 transcript를 자동 삭제합니다(판정 기준은 파일 mtime — 오래된 세션도 `--resume`로 다시 열면 갱신돼 살아남음). 따라서 이 에이전트가 읽을 수 있는 건 **최근 30일 내 세션뿐**이며, **설치 이전에 이미 만료된 과거 세션은 소급 수집이 불가능**합니다. 반대로 데몬이 30일 안에 한 번만 돌면 유실 없이 실시간 수집되므로, 만료가 문제되는 건 오직 과거 소급뿐입니다.
 
@@ -137,7 +137,7 @@ WIM_PROMPT_BASE_URL=https://staging-backoffice-api.wimcorp.co.kr ./wim-backoffic
 전체 파이프라인을 **두 갈래**로 실행한다:
 
 - **폴더 패스** — 등록된 config 폴더마다 Claude Code(`<configDir>/projects/**/*.jsonl`)를 스캔해 **그 폴더의 토큰**으로 업로드.
-- **머신 패스** — Codex(`~/.codex/sessions/**/rollout-*.jsonl`)·Gemini CLI(`~/.gemini/tmp/**/chats/*`)를 머신당 **1회만** 스캔해 primary(`~/.claude`) 토큰으로 귀속(config 폴더에 종속되지 않는 머신 전역 소스라). primary 토큰이 없으면 머신 패스는 skip.
+- **머신 패스** — Codex(`~/.codex/sessions/**/rollout-*.jsonl`)를 머신당 **1회만** 스캔해 primary(`~/.claude`) 토큰으로 귀속(config 폴더에 종속되지 않는 머신 전역 소스라). primary 토큰이 없으면 머신 패스는 skip.
 
 각 패스는 아래 단계를 돈다:
 
@@ -168,7 +168,7 @@ WIM_PROMPT_BASE_URL=https://staging-backoffice-api.wimcorp.co.kr ./wim-backoffic
 
 ## 파싱 규칙 (요점)
 
-각 도구의 세션 파일은 깨끗한 채팅 로그가 아니라 다중화된 이벤트 스트림이라, 어댑터마다 자기 포맷에 맞는 규칙으로 사람 프롬프트만 골라냅니다(Codex는 `rollout-*.jsonl`, Gemini는 monolithic/journal/nested 4형태를 각자 처리). 대표로 **Claude Code** 규칙은 다음과 같습니다:
+각 도구의 세션 파일은 깨끗한 채팅 로그가 아니라 다중화된 이벤트 스트림이라, 어댑터마다 자기 포맷에 맞는 규칙으로 사람 프롬프트만 골라냅니다(Codex는 `rollout-*.jsonl`를 처리). 대표로 **Claude Code** 규칙은 다음과 같습니다:
 
 - **default-deny**: `type=="user"` && 사이드체인 아님 && tool_result 아님. 합성/하니스 주입(`<task-notification>`·`<command-*>`·`<system-reminder>` 등)은 제외. 이미지 첨부 등 배열 content는 text 블록만 추출.
 - **message.id 그룹핑**: 한 메시지가 여러 줄로 쪼개지므로, 응답 텍스트·토큰 수를 `message.id` 단위로 1회만 집계(중복·과대계상 방지).
@@ -193,7 +193,7 @@ WIM_PROMPT_BASE_URL=https://staging-backoffice-api.wimcorp.co.kr ./wim-backoffic
 
 - **지원 OS = macOS · Linux · Windows**(3종 모두 `enroll`·`install`·`run-once` 구현 완료). macOS/Linux가 P1, Windows가 P2로 이어서 구현됐다. Windows는 토큰을 DPAPI 파일로 저장하고 데몬은 작업 스케줄러(Task Scheduler)로 등록한다(위 설치 섹션 참고). Linux는 토큰을 0600 파일로 저장한다(외부 도구 불필요, 아래 참고).
 - **macOS 백그라운드 항목 알림은 OS 정책 — 코드로 완전 제거 불가**. `install`이 등록하는 launchd 사용자 에이전트를 macOS(Ventura+)가 로그인/백그라운드 항목으로 취급해 "백그라운드 항목이 추가됨" 계열 알림을 띄운다. 15분 주기 실행 자체는 재등록하지 않으므로(=주기적 재알림 아님), self-update가 릴리스마다 바이너리를 교체할 때 재고지될 수 있는 정도다. 확인은 **시스템 설정 > 일반 > 로그인 항목**에서 가능하다. plist에 `StandardOutPath`/`StandardErrorPath`를 걸어 데몬 출력을 `agent.log`로 캡처하지만(재설치 시 반영), 알림 자체를 없애지는 못한다.
-- **수집 어댑터 = Claude Code · Codex · Gemini CLI**(3종 구현 완료). 수집원은 `~/.claude/projects/**/*.jsonl`·`~/.codex/sessions/**/rollout-*.jsonl`·`~/.gemini/tmp/**/chats/*` 세 갈래다. Cursor 등 타 도구는 **미구현**(어댑터 추가로 확장 예정).
+- **수집 어댑터 = Claude Code · Codex**(2종 구현 완료). 수집원은 `~/.claude/projects/**/*.jsonl`·`~/.codex/sessions/**/rollout-*.jsonl` 두 갈래다. Cursor 등 타 도구는 **미구현**(어댑터 추가로 확장 예정).
 - **30일 보관 한계**: Claude Code가 30일(`cleanupPeriodDays` 기본값) 지난 transcript를 자동 삭제하므로, **에이전트 설치 이전의 오래된 세션은 소급 수집 불가**. 설치 이후엔 데몬 주기 스캔(15분)으로 만료 전에 전부 잡히므로 유실 없음. 보관을 늘리려면 각 머신 `~/.claude/settings.json`의 `cleanupPeriodDays`를 키워야 하며 이는 에이전트 범위 밖이다.
 - **Linux는 외부 의존성 없음**: 예전엔 `secret-tool`(libsecret)로 키링에 저장했으나, 실행 중인 secret service(gnome-keyring + D-Bus 세션)를 요구해 헤드리스 서버·SSH·WSL·컨테이너에서 못 썼다. 이제 `~/.wim-backoffice-prompt-agent/device-token`(0600 파일)에 저장하므로 데스크톱/헤드리스 무관하게 동작한다.
 

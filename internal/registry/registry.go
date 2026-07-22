@@ -66,7 +66,7 @@ func TokenKeyFor(configDir string) string {
 }
 
 // PrimaryEntry returns the primary (default ~/.claude) entry from the list —
-// the one whose token attributes machine-wide tool sources (~/.codex, ~/.gemini).
+// the one whose token attributes machine-wide tool sources (~/.codex).
 // Returns ok=false if no default entry is present.
 func PrimaryEntry(entries []Entry) (Entry, bool) {
 	for _, e := range entries {
