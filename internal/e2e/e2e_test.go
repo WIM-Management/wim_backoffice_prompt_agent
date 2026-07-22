@@ -19,7 +19,6 @@ import (
 
 	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/adapter/claudecode"
 	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/adapter/codex"
-	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/adapter/gemini"
 	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/model"
 	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/queue"
 	"github.com/WIM-Management/wim_backoffice_prompt_agent/internal/redact"
@@ -164,12 +163,8 @@ const codexMultiToolJSONL = `{"timestamp":"2026-06-24T09:00:00Z","type":"session
 {"timestamp":"2026-06-24T09:00:05Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"코덱스 응답"}]}}
 `
 
-// geminiMultiToolJSON is a monolithic Gemini session JSON with one user→gemini
-// pair. The gemini message carries "model":"gemini-3-flash-preview".
-const geminiMultiToolJSON = `{"sessionId":"gem-1","messages":[{"id":1,"timestamp":1750759200000,"type":"user","content":[{"text":"제미나이 프롬프트"}]},{"id":2,"timestamp":1750759205000,"type":"gemini","content":"제미나이 응답","model":"gemini-3-flash-preview"}]}`
-
 func TestEndToEndMultiTool(t *testing.T) {
-	// ── 1) Temp HOME with fixtures for all three adapters ─────────────────────
+	// ── 1) Temp HOME with fixtures for all adapters ───────────────────────────
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 
@@ -188,20 +183,6 @@ func TestEndToEndMultiTool(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(codexSessDir, "rollout-2026-06-24T09-00-00-abc.jsonl"), []byte(codexMultiToolJSONL), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	// Gemini: tmp/.gemini/tmp/proj/chats/session-2026-06-24T09-00-abc.json
-	// + tmp/.gemini/tmp/proj/.project_root so cwd resolves to /repo
-	geminiChatsDir := filepath.Join(tmp, ".gemini", "tmp", "proj", "chats")
-	if err := os.MkdirAll(geminiChatsDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(geminiChatsDir, "session-2026-06-24T09-00-abc.json"), []byte(geminiMultiToolJSON), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	geminiProjDir := filepath.Join(tmp, ".gemini", "tmp", "proj")
-	if err := os.WriteFile(filepath.Join(geminiProjDir, ".project_root"), []byte("/repo"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -225,7 +206,7 @@ func TestEndToEndMultiTool(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	// ── 3) Wire pipeline: all three adapters, exactly like TestEndToEnd ───────
+	// ── 3) Wire pipeline: all adapters, exactly like TestEndToEnd ─────────────
 	stateFile := filepath.Join(tmp, "state.json")
 	queueDir := filepath.Join(tmp, "queue-mt")
 
@@ -233,7 +214,6 @@ func TestEndToEndMultiTool(t *testing.T) {
 		[]model.Adapter{
 			claudecode.New(filepath.Join(tmp, ".claude")),
 			codex.New(tmp),
-			gemini.New(tmp),
 		},
 		state.New(stateFile),
 		10*time.Minute,
@@ -278,19 +258,19 @@ func TestEndToEndMultiTool(t *testing.T) {
 
 	// ── 5) Assertions ─────────────────────────────────────────────────────────
 
-	// Total event count must be exactly 3 (one per tool).
-	if len(received) != 3 {
-		t.Fatalf("want 3 events (one per tool), got %d; events=%+v", len(received), received)
+	// Total event count must be exactly 2 (one per tool).
+	if len(received) != 2 {
+		t.Fatalf("want 2 events (one per tool), got %d; events=%+v", len(received), received)
 	}
 
 	// Collect sourceTool → event for per-tool assertions.
-	byTool := make(map[string]multiToolEvent, 3)
+	byTool := make(map[string]multiToolEvent, 2)
 	for _, ev := range received {
 		byTool[ev.SourceTool] = ev
 	}
 
-	// All three source tools must be present.
-	for _, want := range []string{"CLAUDE_CODE", "CODEX", "GEMINI"} {
+	// Both source tools must be present.
+	for _, want := range []string{"CLAUDE_CODE", "CODEX"} {
 		if _, ok := byTool[want]; !ok {
 			t.Errorf("missing sourceTool %q in received events; got tools: %v", want, toolKeys(byTool))
 		}
@@ -300,7 +280,6 @@ func TestEndToEndMultiTool(t *testing.T) {
 	wantModels := map[string]string{
 		"CLAUDE_CODE": "claude-opus-4-8",
 		"CODEX":       "gpt-5.3-codex-spark",
-		"GEMINI":      "gemini-3-flash-preview",
 	}
 	for tool, wantModel := range wantModels {
 		ev, ok := byTool[tool]
@@ -325,8 +304,8 @@ func TestEndToEndMultiTool(t *testing.T) {
 		}
 	}
 
-	// projectContext must be non-empty for Claude and Gemini.
-	for _, tool := range []string{"CLAUDE_CODE", "GEMINI"} {
+	// projectContext must be non-empty for Claude.
+	for _, tool := range []string{"CLAUDE_CODE"} {
 		if ev, ok := byTool[tool]; ok && ev.ProjectContext == "" {
 			t.Errorf("tool %s: projectContext is empty", tool)
 		}

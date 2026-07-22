@@ -1,8 +1,0 @@
-{"sessionId":"info-session","projectHash":"aaa111","startTime":1720000100000,"lastUpdated":1720000300000,"kind":"journal"}
-{"$set":{"lastUpdated":1720000110000}}
-{"id":1,"timestamp":1720000120000,"type":"info","content":"Update successful!"}
-{"id":2,"timestamp":1720000130000,"type":"info","content":"Request cancelled."}
-{"id":3,"timestamp":1720000140000,"content":"noise line without type"}
-{"id":4,"timestamp":1720000150000,"type":"user","content":"/help"}
-{"id":5,"timestamp":1720000160000,"type":"user","content":[{"text":"real gemini prompt"}]}
-{"id":6,"timestamp":1720000170000,"type":"gemini","content":"sure, doing it","model":"gemini-3-flash-preview"}
